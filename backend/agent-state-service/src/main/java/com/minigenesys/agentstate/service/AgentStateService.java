@@ -17,6 +17,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -251,6 +252,14 @@ public class AgentStateService {
                 .timestamp(Instant.now())
                 .build();
         agentEventProducer.publishAgentEvent(event);
+    }
+
+    public Map<String, Long> getCounts(String tenantId) {
+        return Map.of(
+            "AVAILABLE", agentRepository.countByTenantIdAndStatus(tenantId, AgentStatus.AVAILABLE),
+            "BUSY", agentRepository.countByTenantIdAndStatus(tenantId, AgentStatus.BUSY),
+            "OFFLINE", agentRepository.countByTenantIdAndStatus(tenantId, AgentStatus.OFFLINE)
+        );
     }
 
     private AgentStateResponse mapToResponse(Agent agent) {

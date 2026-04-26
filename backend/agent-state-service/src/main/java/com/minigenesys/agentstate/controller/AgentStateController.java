@@ -53,6 +53,12 @@ public class AgentStateController {
         return ResponseEntity.ok(agentStateService.changeState(tenantId, agentId, AgentStatus.BUSY));
     }
 
+    @GetMapping("/counts")
+    public ResponseEntity<Map<String, Long>> getCounts(
+            @RequestHeader("X-Tenant-Id") String tenantId) {
+        return ResponseEntity.ok(agentStateService.getCounts(tenantId));
+    }
+
     @PostMapping("/{agentId}/heartbeat")
     public ResponseEntity<Void> heartbeat(
             @PathVariable String agentId,

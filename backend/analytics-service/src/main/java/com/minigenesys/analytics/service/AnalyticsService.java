@@ -6,8 +6,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.Optional;
 
 @Slf4j
@@ -19,7 +22,38 @@ public class AnalyticsService {
 
     public TenantMetrics getMetrics(String tenantId) {
         return repository.findById(tenantId)
-                .orElse(TenantMetrics.builder().tenantId(tenantId).updatedAt(Instant.now()).build());
+                .orElse(TenantMetrics.builder().tenantId(tenantId)
+                        .totalCalls(0L).queuedCalls(0L).routedCalls(0L).completedCalls(0L)
+                        .activeAgents(0L).busyAgents(0L).offlineAgents(0L)
+                        .updatedAt(Instant.now()).build());
+    }
+
+    private final RestTemplate restTemplate = new RestTemplate();
+
+    @Transactional
+    public void syncAgentCounts(String tenantId) {
+        try {
+            // Internal call to agent-state-service
+            String url = "http://localhost:8086/api/v1/agents/counts";
+            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+            headers.set("X-Tenant-Id", tenantId);
+            org.springframework.http.HttpEntity<Void> entity = new org.springframework.http.HttpEntity<>(headers);
+            
+            org.springframework.http.ResponseEntity<java.util.Map> response = 
+                restTemplate.exchange(url, org.springframework.http.HttpMethod.GET, entity, java.util.Map.class);
+            
+            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+                java.util.Map<String, Integer> counts = response.getBody();
+                long active = ((Number) counts.getOrDefault("AVAILABLE", 0)).longValue();
+                long busy = ((Number) counts.getOrDefault("BUSY", 0)).longValue();
+                long offline = ((Number) counts.getOrDefault("OFFLINE", 0)).longValue();
+                
+                setAgentCounts(tenantId, active, busy, offline);
+                log.info("Synced agent counts for tenant {}: Active={}, Busy={}, Offline={}", tenantId, active, busy, offline);
+            }
+        } catch (Exception e) {
+            log.error("Failed to sync agent counts for tenant {}: {}", tenantId, e.getMessage());
+        }
     }
 
     @Transactional

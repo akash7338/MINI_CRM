@@ -13,4 +13,6 @@ public interface AgentRepository extends JpaRepository<Agent, String> {
     java.util.List<Agent> findByStatusInAndLastHeartbeatAtBefore(java.util.Collection<com.minigenesys.agentstate.model.AgentStatus> statuses, Long timestamp);
     
     java.util.List<Agent> findByStatusInAndLastHeartbeatAtIsNull(java.util.Collection<com.minigenesys.agentstate.model.AgentStatus> statuses);
+    
+    long countByTenantIdAndStatus(String tenantId, com.minigenesys.agentstate.model.AgentStatus status);
 }

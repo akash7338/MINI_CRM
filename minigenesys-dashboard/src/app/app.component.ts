@@ -174,6 +174,21 @@ export class AppComponent {
   }
 
   logout() {
+    const agentId = localStorage.getItem('agentId');
+    const role = localStorage.getItem('role');
+    
+    if (role === 'AGENT' && agentId) {
+      // Set to OFFLINE on backend before clearing local state
+      this.api.logoutAgent(agentId).subscribe({
+        next: () => this.finalizeLogout(),
+        error: () => this.finalizeLogout() // Logout anyway on error
+      });
+    } else {
+      this.finalizeLogout();
+    }
+  }
+
+  private finalizeLogout() {
     this.api.logout();
     this.isLoggedIn = false;
     window.location.reload();
