@@ -44,7 +44,10 @@ public class AnalyticsEventConsumer {
     }
 
     private void handleCallEvent(String tenantId, JsonNode node) {
-        analyticsService.incrementTotalCalls(tenantId);
+        boolean isNew = !node.has("isNew") || node.get("isNew").asBoolean();
+        if (isNew) {
+            analyticsService.incrementTotalCalls(tenantId);
+        }
         analyticsService.incrementQueuedCalls(tenantId);
     }
 
@@ -52,21 +55,20 @@ public class AnalyticsEventConsumer {
         String status = node.has("status") ? node.get("status").asText() : "";
         if ("ASSIGNED".equals(status)) {
             analyticsService.incrementRoutedCalls(tenantId);
+            analyticsService.decrementQueuedCalls(tenantId);
         } else if ("NO_AGENT".equals(status)) {
             analyticsService.incrementNoAgentEvents(tenantId);
         } else if ("ABANDONED".equals(status)) {
             analyticsService.incrementAbandonedCalls(tenantId);
+            analyticsService.decrementQueuedCalls(tenantId);
         }
     }
 
     private void handleAgentEvent(String tenantId, JsonNode node) {
-        String eventType = node.has("eventType") ? node.get("eventType").asText() : "";
-        String newStatus = node.has("newStatus") ? node.get("newStatus").asText() : "";
+        String oldStatus = node.has("previousStatus") ? node.get("previousStatus").asText() : null;
+        String newStatus = node.has("newStatus") ? node.get("newStatus").asText() : null;
         
-        // This is a simplified state update. 
-        // In a production app, we might query current counts from agent-state-service 
-        // or maintain a more robust delta in Analytics.
-        analyticsService.updateAgentCounts(tenantId, newStatus);
+        analyticsService.updateAgentCounts(tenantId, oldStatus, newStatus);
     }
 
     private void handleLifecycleEvent(String tenantId, JsonNode node) {

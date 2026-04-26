@@ -33,6 +33,11 @@ public class AnalyticsService {
     }
 
     @Transactional
+    public void decrementQueuedCalls(String tenantId) {
+        updateMetric(tenantId, m -> m.setQueuedCalls(Math.max(0, m.getQueuedCalls() - 1)));
+    }
+
+    @Transactional
     public void incrementRoutedCalls(String tenantId) {
         updateMetric(tenantId, m -> m.setRoutedCalls(m.getRoutedCalls() + 1));
     }
@@ -53,21 +58,23 @@ public class AnalyticsService {
     }
 
     @Transactional
-    public void updateAgentCounts(String tenantId, String statusChange) {
+    public void updateAgentCounts(String tenantId, String oldStatus, String newStatus) {
         updateMetric(tenantId, m -> {
-            // This is a simplified version since we don't track individual agents here
-            // In a real system, we'd use a delta or a more complex state
-            switch (statusChange) {
-                case "AVAILABLE" -> {
-                    m.setActiveAgents(Math.max(0, m.getActiveAgents() + 1));
+            // Decrement previous status count
+            if (oldStatus != null) {
+                switch (oldStatus) {
+                    case "AVAILABLE" -> m.setActiveAgents(Math.max(0, m.getActiveAgents() - 1));
+                    case "BUSY" -> m.setBusyAgents(Math.max(0, m.getBusyAgents() - 1));
+                    case "OFFLINE" -> m.setOfflineAgents(Math.max(0, m.getOfflineAgents() - 1));
                 }
-                case "BUSY" -> {
-                    m.setBusyAgents(Math.max(0, m.getBusyAgents() + 1));
-                    m.setActiveAgents(Math.max(0, m.getActiveAgents() - 1));
-                }
-                case "OFFLINE" -> {
-                    // Logic would depend on previous status, but let's assume decrease of active/busy
-                    m.setOfflineAgents(m.getOfflineAgents() + 1);
+            }
+
+            // Increment new status count
+            if (newStatus != null) {
+                switch (newStatus) {
+                    case "AVAILABLE" -> m.setActiveAgents(m.getActiveAgents() + 1);
+                    case "BUSY" -> m.setBusyAgents(m.getBusyAgents() + 1);
+                    case "OFFLINE" -> m.setOfflineAgents(m.getOfflineAgents() + 1);
                 }
             }
         });
