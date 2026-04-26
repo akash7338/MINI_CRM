@@ -20,3 +20,13 @@
 # IntelliJ
 .idea/
 *.iml
+
+# Node / Frontend
+node_modules/
+dist/
+.angular/
+
+# Binaries and Build
+bin/
+**/*.bin
+out/
