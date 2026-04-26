@@ -1,0 +1,157 @@
+package com.minigenesys.callservice.service;
+
+import com.minigenesys.callservice.dto.*;
+import com.minigenesys.callservice.kafka.CallEventProducer;
+import com.minigenesys.callservice.model.Call;
+import com.minigenesys.callservice.model.CallStatus;
+import com.minigenesys.callservice.repository.CallRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+import com.minigenesys.callservice.dto.CallLifecycleEvent;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class CallService {
+
+    private final CallRepository callRepository;
+    private final CallEventProducer callEventProducer;
+
+    @Transactional
+    public CallResponse createCall(String tenantId, CreateCallRequest request) {
+        Integer priority = request.getPriority() != null ? request.getPriority() : 1;
+
+        Call call = Call.builder()
+                .tenantId(tenantId)
+                .requiredSkills(request.getRequiredSkills())
+                .priority(priority)
+                .status(CallStatus.QUEUED) // Initial status per requirements
+                .build();
+
+        call = callRepository.save(call);
+
+        CallEvent event = CallEvent.builder()
+                .callId(call.getId())
+                .tenantId(call.getTenantId())
+                .requiredSkills(call.getRequiredSkills())
+                .priority(call.getPriority())
+                .build();
+
+        callEventProducer.publishCallEvent(event);
+
+        return mapToResponse(call);
+    }
+
+    @Transactional(readOnly = true)
+    public CallResponse getCall(String callId, String tenantId) {
+        Call call = callRepository.findById(callId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Call not found"));
+
+        if (!call.getTenantId().equals(tenantId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
+        }
+
+        return mapToResponse(call);
+    }
+
+    @Transactional
+    public CallResponse startCall(String callId, String tenantId) {
+        Call call = callRepository.findById(callId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Call not found"));
+
+        if (!call.getTenantId().equals(tenantId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
+        }
+
+        if (call.getStatus() != CallStatus.ROUTED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Call must be in ROUTED status to start");
+        }
+
+        call.setStatus(CallStatus.IN_PROGRESS);
+        call = callRepository.save(call);
+        return mapToResponse(call);
+    }
+
+    @Transactional
+    public CallResponse completeCall(String callId, String tenantId) {
+        Call call = callRepository.findById(callId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Call not found"));
+
+        if (!call.getTenantId().equals(tenantId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
+        }
+
+        if (call.getStatus() != CallStatus.IN_PROGRESS) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Call must be in IN_PROGRESS status to complete");
+        }
+
+        call.setStatus(CallStatus.COMPLETED);
+        call = callRepository.save(call);
+
+        CallLifecycleEvent event = CallLifecycleEvent.builder()
+                .eventType("CALL_COMPLETED")
+                .callId(call.getId())
+                .tenantId(call.getTenantId())
+                .agentId(call.getAssignedAgentId())
+                .build();
+
+        callEventProducer.publishLifecycleEvent(event);
+
+        return mapToResponse(call);
+    }
+
+    @Transactional
+    public void handleRoutingEvent(RoutingEvent event) {
+        log.info("Handling routing event for callId: {}, status: {}", event.getCallId(), event.getStatus());
+        
+        Call call = callRepository.findById(event.getCallId())
+                .orElseGet(() -> {
+                    log.warn("Call not found for ID: {}", event.getCallId());
+                    return null;
+                });
+
+        if (call == null) return;
+
+        // Safety check for tenantId if present in event
+        if (event.getTenantId() != null && !call.getTenantId().equals(event.getTenantId())) {
+            log.error("Tenant mismatch for callId: {}. Event tenant: {}, DB tenant: {}", 
+                event.getCallId(), event.getTenantId(), call.getTenantId());
+            return;
+        }
+
+        String status = event.getStatus();
+        if ("ASSIGNED".equals(status)) {
+            call.setStatus(CallStatus.ROUTED);
+            call.setAssignedAgentId(event.getAgentId());
+            call.setRoutingFailureReason(null);
+        } else if ("NO_AGENT".equals(status)) {
+            call.setStatus(CallStatus.QUEUED);
+            call.setRoutingFailureReason(event.getMessage());
+        } else if ("ERROR".equals(status) || "failed".equalsIgnoreCase(status)) {
+            call.setStatus(CallStatus.FAILED);
+            call.setRoutingFailureReason(event.getMessage());
+        }
+
+        callRepository.save(call);
+        log.info("Updated callId: {} to status: {}", call.getId(), call.getStatus());
+    }
+
+    private CallResponse mapToResponse(Call call) {
+        return CallResponse.builder()
+                .id(call.getId())
+                .tenantId(call.getTenantId())
+                .requiredSkills(call.getRequiredSkills())
+                .priority(call.getPriority())
+                .status(call.getStatus())
+                .assignedAgentId(call.getAssignedAgentId())
+                .routingFailureReason(call.getRoutingFailureReason())
+                .createdAt(call.getCreatedAt())
+                .updatedAt(call.getUpdatedAt())
+                .build();
+    }
+}
