@@ -39,6 +39,24 @@ public class AgentStateService {
     private static final long HEARTBEAT_TIMEOUT_MS = 30000;
 
     @Transactional
+    public AgentStateResponse createAgent(String tenantId, CreateAgentRequest request) {
+        if (agentRepository.existsById(request.getAgentId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Agent ID already exists");
+        }
+
+        Agent agent = Agent.builder()
+                .id(request.getAgentId())
+                .tenantId(tenantId)
+                .name(request.getName())
+                .skills(request.getSkills())
+                .status(AgentStatus.OFFLINE)
+                .build();
+
+        agent = agentRepository.save(agent);
+        return mapToResponse(agent);
+    }
+
+    @Transactional
     public AgentStateResponse changeState(String tenantId, String agentId, AgentStatus newStatus) {
         Agent agent = agentRepository.findByIdAndTenantId(agentId, tenantId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Agent not found"));

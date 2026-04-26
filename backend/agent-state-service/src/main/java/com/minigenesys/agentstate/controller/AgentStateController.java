@@ -6,6 +6,8 @@ import com.minigenesys.agentstate.service.AgentStateService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import com.minigenesys.agentstate.dto.CreateAgentRequest;
+import jakarta.validation.Valid;
 
 import java.util.Map;
 
@@ -15,6 +17,13 @@ import java.util.Map;
 public class AgentStateController {
 
     private final AgentStateService agentStateService;
+
+    @PostMapping("/internal")
+    public ResponseEntity<AgentStateResponse> createAgent(
+            @RequestHeader("X-Tenant-Id") String tenantId,
+            @Valid @RequestBody CreateAgentRequest request) {
+        return ResponseEntity.ok(agentStateService.createAgent(tenantId, request));
+    }
 
     @PostMapping("/{agentId}/login")
     public ResponseEntity<AgentStateResponse> login(
