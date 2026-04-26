@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { Client } from '@stomp/stompjs';
-import * as SockJS from 'sockjs-client';
+import SockJS from 'sockjs-client';
 import { Observable, Subject } from 'rxjs';
 
 @Injectable({
