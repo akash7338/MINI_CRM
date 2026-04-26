@@ -174,6 +174,7 @@ public class CallService {
                     .tenantId(call.getTenantId())
                     .requiredSkills(call.getRequiredSkills())
                     .priority(call.getPriority())
+                    .isNew(false)
                     .build();
 
             callEventProducer.publishCallEvent(requeueEvent);

@@ -16,4 +16,6 @@ public class CallEvent {
     private String tenantId;
     private Set<String> requiredSkills;
     private Integer priority;
+    @Builder.Default
+    private boolean isNew = true;
 }
