@@ -33,6 +33,10 @@ export class ApiService {
     return this.http.put(`${this.GATEWAY_URL}/api/v1/agents/${agentId}/state`, { status });
   }
 
+  getAgentState(agentId: string): Observable<any> {
+    return this.http.get(`${this.GATEWAY_URL}/api/v1/agents/${agentId}/state`);
+  }
+
   heartbeatAgent(agentId: string): Observable<any> {
     return this.http.post(`${this.GATEWAY_URL}/api/v1/agents/${agentId}/heartbeat`, {});
   }

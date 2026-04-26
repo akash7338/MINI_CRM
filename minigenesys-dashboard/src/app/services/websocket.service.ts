@@ -1,7 +1,10 @@
 import { Injectable } from '@angular/core';
 import { Client } from '@stomp/stompjs';
-import SockJS from 'sockjs-client';
+import * as _SockJS from 'sockjs-client';
 import { Observable, Subject } from 'rxjs';
+
+// Handling SockJS in ESBuild/Angular environments
+const SockJS = (_SockJS as any).default || _SockJS;
 
 @Injectable({
   providedIn: 'root'
@@ -20,11 +23,6 @@ export class WebsocketService {
 
     this.stompClient.onConnect = (frame) => {
       console.log('Connected: ' + frame);
-      this.stompClient.subscribe('/topic/events', (message) => {
-        if (message.body) {
-          this.eventsSubject.next(JSON.parse(message.body));
-        }
-      });
       this.stompClient.subscribe('/topic/events/tenant1', (message) => {
         if (message.body) {
           this.eventsSubject.next(JSON.parse(message.body));

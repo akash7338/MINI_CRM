@@ -9,6 +9,13 @@ import { ApiService } from '../services/api.service';
   template: `
     <div class="panel">
       <h2>Metrics Panel (tenant1)</h2>
+      
+      <div *ngIf="loading && !metrics" style="color: #666;">Loading metrics...</div>
+      
+      <div *ngIf="error" style="color: red; margin-bottom: 10px;">
+        {{ error }}
+      </div>
+
       <div *ngIf="metrics" class="dashboard-grid">
         <div>
           <p><strong>Total Calls:</strong> {{ metrics.totalCalls }}</p>
@@ -32,6 +39,8 @@ import { ApiService } from '../services/api.service';
 export class MetricsPanelComponent implements OnInit, OnDestroy {
   metrics: any = null;
   intervalId: any;
+  loading = true;
+  error = '';
 
   constructor(private api: ApiService) {}
 
@@ -47,8 +56,17 @@ export class MetricsPanelComponent implements OnInit, OnDestroy {
   }
 
   fetchMetrics() {
-    this.api.getMetrics('tenant1').subscribe(res => {
-      this.metrics = res;
+    this.api.getMetrics('tenant1').subscribe({
+      next: (res) => {
+        this.metrics = res;
+        this.loading = false;
+        this.error = '';
+      },
+      error: (err) => {
+        this.error = 'Failed to load metrics.';
+        this.loading = false;
+      }
     });
   }
 }
+
