@@ -3,6 +3,7 @@ package com.minigenesys.routing.kafka;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.minigenesys.routing.dto.AssignmentResult;
 import com.minigenesys.routing.dto.CallRequest;
+import com.minigenesys.routing.service.QueueManager;
 import com.minigenesys.routing.service.RoutingService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -16,6 +17,7 @@ import org.springframework.stereotype.Component;
 public class KafkaMessaging {
 
     private final RoutingService routingService;
+    private final QueueManager queueManager;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
 
@@ -29,6 +31,12 @@ public class KafkaMessaging {
             CallRequest request = objectMapper.readValue(message, CallRequest.class);
             AssignmentResult result = routingService.processRouting(request);
             produceRoutingEvent(result);
+
+            // If no agent available, enqueue the call for retry
+            if ("NO_AGENT".equals(result.getStatus())) {
+                queueManager.enqueue(request);
+                log.info("Call {} enqueued for retry", request.getCallId());
+            }
         } catch (Exception e) {
             log.error("Failed to process call event: ", e);
         }
@@ -38,7 +46,7 @@ public class KafkaMessaging {
         log.info("Producing routing event for callId: {}, status: {}", result.getCallId(), result.getStatus());
         try {
             String message = objectMapper.writeValueAsString(result);
-            kafkaTemplate.send(ROUTING_EVENTS_TOPIC, result.getCallId(), message);
+            kafkaTemplate.send(ROUTING_EVENTS_TOPIC, result.getTenantId(), message);
         } catch (Exception e) {
             log.error("Failed to serialize routing result: ", e);
         }

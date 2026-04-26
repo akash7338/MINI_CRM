@@ -23,7 +23,6 @@ public class RoutingEngine {
 
     private final StringRedisTemplate redisTemplate;
     private final AssignmentRepository assignmentRepository;
-    private final com.minigenesys.routing.service.QueueManager queueManager;
 
     private static final String LOCK_KEY_PREFIX = "routing:lock:call:";
     private static final String IDEMPOTENCY_KEY_PREFIX = "routing:assignment:call:";
@@ -81,9 +80,8 @@ public class RoutingEngine {
             );
 
             if (selectedAgentId == null) {
-                log.info("No agent available for call {} in tenant {}. Enqueuing.", callId, tenantId);
-                queueManager.enqueue(call);
-                return AssignmentResult.failure(callId, tenantId, "NO_AGENT", "No available agent matches skills. Call enqueued.");
+                log.info("No agent available for call {} in tenant {}", callId, tenantId);
+                return AssignmentResult.failure(callId, tenantId, "NO_AGENT", "No available agent matches skills");
             }
 
             // 4. Persist and Cache Result
