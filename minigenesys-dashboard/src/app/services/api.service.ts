@@ -13,6 +13,15 @@ export class ApiService {
 
   constructor(private http: HttpClient) {}
 
+  private getHeaders() {
+    const token = localStorage.getItem('token');
+    return {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    };
+  }
+
   setAgentId(id: string) {
     this.agentIdSubject.next(id);
   }
@@ -23,43 +32,52 @@ export class ApiService {
 
   private isRefreshing = false;
 
-  login(): Observable<any> {
-    return this.http.post(`${this.GATEWAY_URL}/auth/login`, {}).pipe(
+  login(credentials: any): Observable<any> {
+    return this.http.post(`${this.GATEWAY_URL}/api/v1/auth/login`, credentials).pipe(
       tap((res: any) => {
         if (res.accessToken) {
           localStorage.setItem('token', res.accessToken);
+          localStorage.setItem('role', res.role);
+          localStorage.setItem('tenantId', res.tenantId);
+          if (res.agentId) {
+            localStorage.setItem('agentId', res.agentId);
+            this.setAgentId(res.agentId);
+          }
         }
       })
     );
   }
 
+  logout() {
+    localStorage.clear();
+  }
+
   // Helper to handle 401s globally if needed, or just let components handle it.
-  // For now, let's add a robust login check.
   ensureAuth(): Observable<any> {
     const token = localStorage.getItem('token');
-    if (!token) return this.login();
+    if (!token) throw new Error('Not authenticated');
     return new Observable(obs => obs.next(token));
   }
 
   // Agent API
   loginAgent(agentId: string): Observable<any> {
-    return this.http.post(`${this.GATEWAY_URL}/api/v1/agents/${agentId}/login`, {});
+    return this.http.post(`${this.GATEWAY_URL}/api/v1/agents/${agentId}/login`, {}, this.getHeaders());
   }
 
   logoutAgent(agentId: string): Observable<any> {
-    return this.http.post(`${this.GATEWAY_URL}/api/v1/agents/${agentId}/logout`, {});
+    return this.http.post(`${this.GATEWAY_URL}/api/v1/agents/${agentId}/logout`, {}, this.getHeaders());
   }
 
   setAgentState(agentId: string, status: string): Observable<any> {
-    return this.http.put(`${this.GATEWAY_URL}/api/v1/agents/${agentId}/state`, { status });
+    return this.http.put(`${this.GATEWAY_URL}/api/v1/agents/${agentId}/state`, { status }, this.getHeaders());
   }
 
   getAgentState(agentId: string): Observable<any> {
-    return this.http.get(`${this.GATEWAY_URL}/api/v1/agents/${agentId}/state`);
+    return this.http.get(`${this.GATEWAY_URL}/api/v1/agents/${agentId}/state`, this.getHeaders());
   }
 
   heartbeatAgent(agentId: string): Observable<any> {
-    return this.http.post(`${this.GATEWAY_URL}/api/v1/agents/${agentId}/heartbeat`, {});
+    return this.http.post(`${this.GATEWAY_URL}/api/v1/agents/${agentId}/heartbeat`, {}, this.getHeaders());
   }
 
   // Call API
@@ -67,16 +85,23 @@ export class ApiService {
     return this.http.post(`${this.GATEWAY_URL}/api/v1/calls`, { 
       tenantId, 
       requiredSkills: [skill] 
-    });
+    }, this.getHeaders());
   }
 
   updateCallStatus(callId: string, status: string): Observable<any> {
     const endpoint = status === 'COMPLETED' ? 'complete' : 'start';
-    return this.http.post(`${this.GATEWAY_URL}/api/v1/calls/${callId}/${endpoint}`, {});
+    return this.http.post(`${this.GATEWAY_URL}/api/v1/calls/${callId}/${endpoint}`, {}, this.getHeaders());
   }
 
   // Analytics API
   getMetrics(tenantId: string): Observable<any> {
-    return this.http.get(`${this.GATEWAY_URL}/api/v1/analytics/${tenantId}/metrics`);
+    return this.http.get(`${this.GATEWAY_URL}/api/v1/analytics/${tenantId}/metrics`, this.getHeaders());
+  }
+
+  // Admin APIs
+  createAgent(tenantId: string, agentData: any): Observable<any> {
+    const options: any = this.getHeaders();
+    options.headers['X-Tenant-Id'] = tenantId;
+    return this.http.post(`${this.GATEWAY_URL}/api/v1/users/agents`, agentData, options);
   }
 }

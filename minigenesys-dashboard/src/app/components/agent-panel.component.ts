@@ -23,23 +23,25 @@ import { Subscription } from 'rxjs';
 
       <div style="margin-bottom: 24px;">
         <label style="display: block; font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase;">Agent Identity</label>
-        <div style="display: flex; gap: 12px;">
-          <input type="text" [(ngModel)]="agentId" (ngModelChange)="onAgentIdChange()" placeholder="Enter Agent ID" [disabled]="status !== 'OFFLINE'">
-          <button class="btn btn-primary" (click)="login()" [disabled]="status !== 'OFFLINE' || !agentId">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg>
-            Sign In
-          </button>
+        <div style="font-size: 16px; font-weight: 600; color: var(--text-main);">
+          {{ agentId }}
         </div>
       </div>
 
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-        <button class="btn btn-outline" (click)="setAvailable()" [disabled]="status === 'OFFLINE' || status === 'AVAILABLE' || status === 'BUSY'">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-          Go Available
+      <div style="display: grid; grid-template-columns: 1fr; gap: 12px;">
+        <button class="btn btn-primary" (click)="login()" *ngIf="status === 'OFFLINE'">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg>
+          Start Shift
         </button>
-        <button class="btn btn-ghost" style="color: var(--danger);" (click)="logout()" [disabled]="status === 'OFFLINE'">
+        
+        <button class="btn btn-outline" (click)="setAvailable()" *ngIf="status !== 'OFFLINE' && status !== 'AVAILABLE'" [disabled]="status === 'BUSY'">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+          Set Ready
+        </button>
+
+        <button class="btn btn-ghost" style="color: var(--danger);" (click)="logout()" *ngIf="status !== 'OFFLINE'">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
-          Logout
+          End Shift
         </button>
       </div>
 
@@ -59,20 +61,24 @@ export class AgentPanelComponent implements OnInit, OnDestroy {
   constructor(private api: ApiService, private session: SessionStateService) {}
 
   ngOnInit() {
+    const savedAgentId = localStorage.getItem('agentId');
+    if (savedAgentId) {
+      this.agentId = savedAgentId;
+      this.session.setAgentId(savedAgentId);
+    }
+    
     // Rehydrate from shared state on mount
     this.sub = this.session.agent$.subscribe(state => {
-      this.agentId = state.agentId;
       this.status = state.status;
+      if (state.agentId && state.agentId !== 'agent-ui-1') {
+        this.agentId = state.agentId;
+      }
     });
   }
 
   ngOnDestroy() {
     this.sub?.unsubscribe();
     // Do NOT stop heartbeat here — SessionStateService owns it
-  }
-
-  onAgentIdChange() {
-    this.session.setAgentId(this.agentId);
   }
 
   getStatusClass() {
