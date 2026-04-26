@@ -1,0 +1,17 @@
+# Java build files
+*.jar
+*.war
+*.ear
+
+# Gradle
+build/
+.gradle/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+
+# Env
+.env
