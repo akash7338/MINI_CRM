@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Gateway Test</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.6.1/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #f4f4f9; color: #333; }
+        #log { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 8px; height: 400px; overflow-y: auto; font-family: monospace; white-space: pre-wrap; border: 1px solid #333; }
+        .event-global { color: #4fc1ff; }
+        .event-tenant { color: #b5cea8; }
+        .status { margin-bottom: 10px; font-weight: bold; }
+        .status.connected { color: #4ec9b0; }
+        .status.disconnected { color: #f44747; }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Gateway Test</h1>
+    <div id="status" class="status disconnected">Status: Disconnected</div>
+    <div id="log"></div>
+
+    <script>
+        const logEl = document.getElementById('log');
+        const statusEl = document.getElementById('status');
+
+        function log(message, className) {
+            const div = document.createElement('div');
+            div.className = className || '';
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logEl.appendChild(div);
+            logEl.scrollTop = logEl.scrollHeight;
+            console.log(message);
+        }
+
+        const socket = new SockJS('http://localhost:8088/ws');
+        const stompClient = Stomp.over(socket);
+
+        stompClient.connect({}, function (frame) {
+            statusEl.textContent = 'Status: Connected';
+            statusEl.className = 'status connected';
+            log('Connected: ' + frame);
+
+            // Subscribe to Global Events
+            stompClient.subscribe('/topic/events', function (event) {
+                log('GLOBAL: ' + event.body, 'event-global');
+            });
+
+            // Subscribe to Tenant1 Events
+            stompClient.subscribe('/topic/events/tenant1', function (event) {
+                log('TENANT1: ' + event.body, 'event-tenant');
+            });
+
+        }, function (error) {
+            statusEl.textContent = 'Status: Error - ' + error;
+            statusEl.className = 'status disconnected';
+            log('Error: ' + error);
+        });
+    </script>
+</body>
+</html>

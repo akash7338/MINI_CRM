@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: websocket-gateway
+  
+  kafka:
+    bootstrap-servers: ${KAFKA_SERVERS:localhost:9092}
+    consumer:
+      group-id: websocket-gateway-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+server:
+  port: 8088
+
+logging:
+  level:
+    com.minigenesys.websocket: DEBUG
