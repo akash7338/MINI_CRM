@@ -37,6 +37,7 @@ public class Agent {
     private AgentStatus status;
 
     private Long lastAssignedTime;
+    private Long lastHeartbeatAt;
 
     @CreationTimestamp
     private Instant createdAt;

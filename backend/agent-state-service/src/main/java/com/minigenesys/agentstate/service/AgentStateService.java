@@ -9,13 +9,17 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import com.minigenesys.agentstate.dto.CallLifecycleEvent;
 
@@ -30,6 +34,9 @@ public class AgentStateService {
 
     private static final String AGENT_STATE_KEY_TPL = "tenant:%s:agent:%s:state";
     private static final String SKILL_KEY_TPL = "tenant:%s:skill:%s:available";
+    private static final String HEARTBEAT_KEY_TPL = "tenant:%s:agent:%s:heartbeat";
+    
+    private static final long HEARTBEAT_TIMEOUT_MS = 30000;
 
     @Transactional
     public AgentStateResponse changeState(String tenantId, String agentId, AgentStatus newStatus) {
@@ -49,9 +56,59 @@ public class AgentStateService {
 
         agent = agentRepository.save(agent);
         updateRedisState(agent, oldStatus, newStatus);
-        publishEvent(agent, oldStatus, newStatus);
+        publishEvent(agent, oldStatus, newStatus, "AGENT_" + newStatus.name());
 
         return mapToResponse(agent);
+    }
+
+    @Transactional
+    public void handleHeartbeat(String tenantId, String agentId) {
+        Agent agent = agentRepository.findByIdAndTenantId(agentId, tenantId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Agent not found"));
+
+        if (agent.getStatus() == AgentStatus.OFFLINE) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Agent is OFFLINE. Please login first.");
+        }
+
+        long now = Instant.now().toEpochMilli();
+        agent.setLastHeartbeatAt(now);
+        agentRepository.save(agent);
+
+        String heartbeatKey = String.format(HEARTBEAT_KEY_TPL, tenantId, agentId);
+        redisTemplate.opsForValue().set(heartbeatKey, String.valueOf(now), HEARTBEAT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        
+        log.debug("Heartbeat received for agent {} in tenant {}", agentId, tenantId);
+    }
+
+    @Scheduled(fixedRateString = "${agent.heartbeat.scan-interval:10000}")
+    @Transactional
+    public void detectDisconnects() {
+        long threshold = Instant.now().toEpochMilli() - HEARTBEAT_TIMEOUT_MS;
+        List<AgentStatus> activeStatuses = List.of(AgentStatus.AVAILABLE, AgentStatus.BUSY);
+        
+        List<Agent> expiredAgents = agentRepository.findByStatusInAndLastHeartbeatAtBefore(activeStatuses, threshold);
+        // Also check agents who never sent a heartbeat but are active (if any)
+        List<Agent> neverHeartbeatAgents = agentRepository.findByStatusInAndLastHeartbeatAtIsNull(activeStatuses);
+        
+        expiredAgents.addAll(neverHeartbeatAgents);
+
+        if (expiredAgents.isEmpty()) return;
+
+        log.info("Detected {} disconnected agents", expiredAgents.size());
+
+        for (Agent agent : expiredAgents) {
+            AgentStatus oldStatus = agent.getStatus();
+            agent.setStatus(AgentStatus.OFFLINE);
+            agentRepository.save(agent);
+
+            updateRedisState(agent, oldStatus, AgentStatus.OFFLINE);
+            publishEvent(agent, oldStatus, AgentStatus.OFFLINE, "AGENT_DISCONNECTED");
+            
+            // Explicitly delete heartbeat key
+            redisTemplate.delete(String.format(HEARTBEAT_KEY_TPL, agent.getTenantId(), agent.getId()));
+            
+            log.info("Agent {} marked OFFLINE due to heartbeat timeout", agent.getId());
+        }
     }
 
     @Transactional(readOnly = true)
@@ -87,7 +144,7 @@ public class AgentStateService {
         updateRedisState(agent, oldStatus, AgentStatus.BUSY);
         
         // Publish agent-events
-        publishEvent(agent, oldStatus, AgentStatus.BUSY);
+        publishEvent(agent, oldStatus, AgentStatus.BUSY, "AGENT_BUSY");
         
         log.info("Agent {} state synchronized to BUSY", agent.getId());
     }
@@ -113,7 +170,7 @@ public class AgentStateService {
         updateRedisState(agent, oldStatus, AgentStatus.AVAILABLE);
 
         // Publish agent-events
-        publishEvent(agent, oldStatus, AgentStatus.AVAILABLE);
+        publishEvent(agent, oldStatus, AgentStatus.AVAILABLE, "AGENT_AVAILABLE");
 
         log.info("Agent {} state synchronized back to AVAILABLE after call completion", agent.getId());
     }
@@ -155,10 +212,10 @@ public class AgentStateService {
         }
     }
 
-    private void publishEvent(Agent agent, AgentStatus oldStatus, AgentStatus newStatus) {
+    private void publishEvent(Agent agent, AgentStatus oldStatus, AgentStatus newStatus, String eventType) {
         AgentEvent event = AgentEvent.builder()
                 .eventId(UUID.randomUUID().toString())
-                .eventType("AGENT_" + newStatus.name())
+                .eventType(eventType)
                 .agentId(agent.getId())
                 .tenantId(agent.getTenantId())
                 .previousStatus(oldStatus != null ? oldStatus.name() : null)

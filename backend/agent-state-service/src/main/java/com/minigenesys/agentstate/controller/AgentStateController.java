@@ -44,6 +44,14 @@ public class AgentStateController {
         return ResponseEntity.ok(agentStateService.changeState(tenantId, agentId, AgentStatus.BUSY));
     }
 
+    @PostMapping("/{agentId}/heartbeat")
+    public ResponseEntity<Void> heartbeat(
+            @PathVariable String agentId,
+            @RequestHeader("X-Tenant-Id") String tenantId) {
+        agentStateService.handleHeartbeat(tenantId, agentId);
+        return ResponseEntity.ok().build();
+    }
+
     @GetMapping("/{agentId}/state")
     public ResponseEntity<AgentStateResponse> getState(
             @PathVariable String agentId,

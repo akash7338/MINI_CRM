@@ -9,4 +9,8 @@ import java.util.Optional;
 @Repository
 public interface AgentRepository extends JpaRepository<Agent, String> {
     Optional<Agent> findByIdAndTenantId(String id, String tenantId);
+    
+    java.util.List<Agent> findByStatusInAndLastHeartbeatAtBefore(java.util.Collection<com.minigenesys.agentstate.model.AgentStatus> statuses, Long timestamp);
+    
+    java.util.List<Agent> findByStatusInAndLastHeartbeatAtIsNull(java.util.Collection<com.minigenesys.agentstate.model.AgentStatus> statuses);
 }
