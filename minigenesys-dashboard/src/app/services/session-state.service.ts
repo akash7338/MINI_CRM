@@ -5,7 +5,7 @@ import { WebsocketService } from './websocket.service';
 
 export interface AgentState {
   agentId: string;
-  status: string;        // OFFLINE | AVAILABLE | BUSY
+  status: string;        // Offline | Ready | On Call
 }
 
 export interface CallState {
@@ -20,7 +20,7 @@ export class SessionStateService implements OnDestroy {
   // --- Agent State ---
   private agentSubject = new BehaviorSubject<AgentState>({
     agentId: 'agent-ui-1',
-    status: 'OFFLINE'
+    status: 'Offline'
   });
   agent$ = this.agentSubject.asObservable();
 
@@ -77,7 +77,7 @@ export class SessionStateService implements OnDestroy {
 
   setAgentStatus(status: string) {
     this.patchAgent({ status });
-    if (status === 'OFFLINE') {
+    if (status === 'Offline') {
       this.stopHeartbeat();
     }
   }
@@ -86,24 +86,24 @@ export class SessionStateService implements OnDestroy {
     this.stopHeartbeat();
     
     const agentId = this.agent.agentId.trim();
-    if (!agentId || this.agent.status === 'OFFLINE') return;
+    if (!agentId || this.agent.status === 'Offline') return;
 
     // Send first heartbeat immediately
     this.api.heartbeatAgent(agentId).subscribe({
       error: (err) => {
-        if (err.status === 409) this.setAgentStatus('OFFLINE');
+        if (err.status === 409) this.setAgentStatus('Offline');
       }
     });
 
     this.heartbeatInterval = setInterval(() => {
-      if (!agentId || this.agent.status === 'OFFLINE') {
+      if (!agentId || this.agent.status === 'Offline') {
         this.stopHeartbeat();
         return;
       }
       this.api.heartbeatAgent(agentId).subscribe({
         error: (err) => {
           if (err.status === 409) {
-            this.setAgentStatus('OFFLINE');
+            this.setAgentStatus('Offline');
           }
         }
       });
@@ -141,13 +141,13 @@ export class SessionStateService implements OnDestroy {
         const rawStatus = payload.eventType || payload.newStatus || '';
         const newStatus = this.mapAgentStatus(rawStatus);
         
-        // Guard: Do NOT go OFFLINE if we have an active call (ROUTED / IN_PROGRESS).
+        // Guard: Do NOT go Offline if we have an active call (ROUTED / IN_PROGRESS).
         // The backend may send AGENT_DISCONNECTED due to heartbeat race conditions
         // even while the agent has an active call assignment.
-        if (newStatus === 'OFFLINE' && this.call.callId) {
+        if (newStatus === 'Offline' && this.call.callId) {
           const callStatus = this.call.status;
           if (callStatus === 'ROUTED' || callStatus === 'IN_PROGRESS' || callStatus === 'QUEUED') {
-            console.warn('[SessionState] Ignoring OFFLINE event — active call exists:', this.call.callId);
+            console.warn('[SessionState] Ignoring Offline event — active call exists:', this.call.callId);
             return;
           }
         }
@@ -156,7 +156,7 @@ export class SessionStateService implements OnDestroy {
       }
     } else if (topic === 'routing-events') {
       if (payload.status === 'ASSIGNED' && payload.agentId === currentAgentId) {
-        this.setAgentStatus('BUSY');
+        this.setAgentStatus('On Call');
         if (payload.callId) {
           this.setCall(payload.callId, 'ROUTED');
         }
@@ -179,19 +179,19 @@ export class SessionStateService implements OnDestroy {
       }
       // Update agent status on call completion
       if (payload.eventType === 'CALL_COMPLETED' && payload.agentId === currentAgentId) {
-        this.setAgentStatus('AVAILABLE');
+        this.setAgentStatus('Ready');
       }
     }
   }
 
   // Map backend agent status values to our UI states
-  private mapAgentStatus(backendStatus: string): string {
-    if (!backendStatus) return 'OFFLINE';
+  public mapAgentStatus(backendStatus: string): string {
+    if (!backendStatus) return 'Offline';
     const s = backendStatus.toUpperCase();
-    if (s.includes('AVAILABLE')) return 'AVAILABLE';
-    if (s.includes('BUSY')) return 'BUSY';
-    if (s.includes('LOGGED_IN')) return 'LOGGED_IN';
-    if (s.includes('DISCONNECTED') || s.includes('OFFLINE') || s.includes('LOGGED_OUT')) return 'OFFLINE';
+    if (s.includes('AVAILABLE')) return 'Ready';
+    if (s.includes('BUSY')) return 'On Call';
+    if (s.includes('LOGGED_IN')) return 'Offline';
+    if (s.includes('DISCONNECTED') || s.includes('OFFLINE') || s.includes('LOGGED_OUT')) return 'Offline';
     return backendStatus; // pass-through for any we haven't mapped
   }
 

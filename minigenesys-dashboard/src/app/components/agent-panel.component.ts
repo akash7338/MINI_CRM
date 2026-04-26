@@ -29,17 +29,17 @@ import { Subscription } from 'rxjs';
       </div>
 
       <div style="display: grid; grid-template-columns: 1fr; gap: 12px;">
-        <button class="btn btn-primary" (click)="login()" *ngIf="status === 'OFFLINE'">
+        <button class="btn btn-primary" (click)="login()" *ngIf="status === 'Offline'">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg>
           Start Shift
         </button>
         
-        <button class="btn btn-outline" (click)="setAvailable()" *ngIf="status !== 'OFFLINE' && status !== 'AVAILABLE'" [disabled]="status === 'BUSY'">
+        <button class="btn btn-outline" (click)="setAvailable()" *ngIf="status !== 'Offline' && status !== 'Ready'" [disabled]="status === 'On Call'">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
           Set Ready
         </button>
 
-        <button class="btn btn-ghost" style="color: var(--danger);" (click)="logout()" *ngIf="status !== 'OFFLINE'">
+        <button class="btn btn-ghost" style="color: var(--danger);" (click)="logout()" *ngIf="status !== 'Offline'">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
           End Shift
         </button>
@@ -54,7 +54,7 @@ import { Subscription } from 'rxjs';
 })
 export class AgentPanelComponent implements OnInit, OnDestroy {
   agentId = 'agent-ui-1';
-  status = 'OFFLINE';
+  status = 'Offline';
   errorMessage = '';
   private sub?: Subscription;
 
@@ -83,8 +83,8 @@ export class AgentPanelComponent implements OnInit, OnDestroy {
 
   getStatusClass() {
     switch (this.status) {
-      case 'AVAILABLE': return 'status-available';
-      case 'BUSY': return 'status-busy';
+      case 'Ready': return 'status-available';
+      case 'On Call': return 'status-busy';
       default: return 'status-offline';
     }
   }
@@ -94,7 +94,7 @@ export class AgentPanelComponent implements OnInit, OnDestroy {
     const cleanId = this.agentId.trim();
     this.api.loginAgent(cleanId).subscribe({
       next: (res) => {
-        this.session.setAgentStatus(res.status);
+        this.session.setAgentStatus(this.session.mapAgentStatus(res.status));
         this.session.startHeartbeat();
       },
       error: (err) => {
@@ -110,7 +110,7 @@ export class AgentPanelComponent implements OnInit, OnDestroy {
     const cleanId = this.agentId.trim();
     this.api.setAgentState(cleanId, 'AVAILABLE').subscribe({
       next: (res) => {
-        this.session.setAgentStatus(res.status);
+        this.session.setAgentStatus(this.session.mapAgentStatus(res.status));
         this.session.startHeartbeat();
       },
       error: (err) => {
@@ -123,7 +123,7 @@ export class AgentPanelComponent implements OnInit, OnDestroy {
   private syncState(agentId: string) {
     this.api.getAgentState(agentId).subscribe({
       next: (res) => {
-        this.session.setAgentStatus(res.status);
+        this.session.setAgentStatus(this.session.mapAgentStatus(res.status));
         this.session.startHeartbeat();
       },
       error: () => this.errorMessage = `State sync failed`
@@ -135,7 +135,7 @@ export class AgentPanelComponent implements OnInit, OnDestroy {
     const cleanId = this.agentId.trim();
     this.api.logoutAgent(cleanId).subscribe({
       next: (res) => {
-        this.session.setAgentStatus(res.status);
+        this.session.setAgentStatus(this.session.mapAgentStatus(res.status));
         this.session.stopHeartbeat();
         this.session.clearCall();
       },

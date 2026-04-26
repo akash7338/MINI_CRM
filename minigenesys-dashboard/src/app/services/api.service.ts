@@ -69,7 +69,8 @@ export class ApiService {
   }
 
   setAgentState(agentId: string, status: string): Observable<any> {
-    return this.http.put(`${this.GATEWAY_URL}/api/v1/agents/${agentId}/state`, { status }, this.getHeaders());
+    const endpoint = status.toLowerCase() === 'available' ? 'available' : 'busy';
+    return this.http.post(`${this.GATEWAY_URL}/api/v1/agents/${agentId}/${endpoint}`, {}, this.getHeaders());
   }
 
   getAgentState(agentId: string): Observable<any> {

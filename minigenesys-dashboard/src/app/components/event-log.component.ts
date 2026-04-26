@@ -74,8 +74,25 @@ export class EventLogComponent implements OnInit, OnDestroy {
 
   formatPayload(payload: any): string {
     if (!payload) return '';
-    if (payload.eventType) return `${payload.eventType} for ${payload.agentId || payload.callId}`;
-    if (payload.status) return `Call ${payload.callId} status changed to ${payload.status}`;
+    
+    // Terminology Mapping Helper
+    const map = (val: string) => {
+      if (!val) return val;
+      const s = val.toUpperCase();
+      if (s.includes('AVAILABLE') || s === 'READY') return 'Ready';
+      if (s.includes('BUSY') || s === 'ON CALL') return 'On Call';
+      if (s.includes('OFFLINE') || s.includes('DISCONNECTED')) return 'Offline';
+      return val;
+    };
+
+    if (payload.eventType) {
+      const friendlyEvent = map(payload.eventType);
+      return `${friendlyEvent} for ${payload.agentId || payload.callId}`;
+    }
+    if (payload.status) {
+      const friendlyStatus = map(payload.status);
+      return `Call ${payload.callId} status changed to ${friendlyStatus}`;
+    }
     return JSON.stringify(payload);
   }
 }
