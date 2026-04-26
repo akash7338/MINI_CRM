@@ -1,11 +1,12 @@
-# Java build files
+# Gradle (recursive)
+**/.gradle/
+**/build/
+
+# Java build
+*.class
 *.jar
 *.war
 *.ear
-
-# Gradle
-build/
-.gradle/
 
 # Logs
 *.log
@@ -15,3 +16,7 @@ build/
 
 # Env
 .env
+
+# IntelliJ
+.idea/
+*.iml
