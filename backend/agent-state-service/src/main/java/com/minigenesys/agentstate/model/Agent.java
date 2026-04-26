@@ -38,6 +38,7 @@ public class Agent {
 
     private Long lastAssignedTime;
     private Long lastHeartbeatAt;
+    private String activeCallId;
 
     @CreationTimestamp
     private Instant createdAt;

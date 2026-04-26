@@ -1,14 +1,27 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, tap } from 'rxjs';
+import { Observable, tap, BehaviorSubject } from 'rxjs';
 
 @Injectable({
   providedIn: 'root'
 })
 export class ApiService {
   private readonly GATEWAY_URL = 'http://localhost:8080';
+  
+  private agentIdSubject = new BehaviorSubject<string>('agent-ui-1');
+  agentId$ = this.agentIdSubject.asObservable();
 
   constructor(private http: HttpClient) {}
+
+  setAgentId(id: string) {
+    this.agentIdSubject.next(id);
+  }
+
+  get currentAgentId() {
+    return this.agentIdSubject.value;
+  }
+
+  private isRefreshing = false;
 
   login(): Observable<any> {
     return this.http.post(`${this.GATEWAY_URL}/auth/login`, {}).pipe(
@@ -18,6 +31,14 @@ export class ApiService {
         }
       })
     );
+  }
+
+  // Helper to handle 401s globally if needed, or just let components handle it.
+  // For now, let's add a robust login check.
+  ensureAuth(): Observable<any> {
+    const token = localStorage.getItem('token');
+    if (!token) return this.login();
+    return new Observable(obs => obs.next(token));
   }
 
   // Agent API
@@ -42,16 +63,16 @@ export class ApiService {
   }
 
   // Call API
-  createCall(skills: string[]): Observable<any> {
-    return this.http.post(`${this.GATEWAY_URL}/api/v1/calls`, { requiredSkills: skills });
+  createCall(tenantId: string, skill: string): Observable<any> {
+    return this.http.post(`${this.GATEWAY_URL}/api/v1/calls`, { 
+      tenantId, 
+      requiredSkills: [skill] 
+    });
   }
 
-  startCall(callId: string): Observable<any> {
-    return this.http.post(`${this.GATEWAY_URL}/api/v1/calls/${callId}/start`, {});
-  }
-
-  completeCall(callId: string): Observable<any> {
-    return this.http.post(`${this.GATEWAY_URL}/api/v1/calls/${callId}/complete`, {});
+  updateCallStatus(callId: string, status: string): Observable<any> {
+    const endpoint = status === 'COMPLETED' ? 'complete' : 'start';
+    return this.http.post(`${this.GATEWAY_URL}/api/v1/calls/${callId}/${endpoint}`, {});
   }
 
   // Analytics API

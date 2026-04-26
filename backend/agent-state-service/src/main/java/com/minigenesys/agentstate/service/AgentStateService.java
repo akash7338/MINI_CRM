@@ -52,6 +52,8 @@ public class AgentStateService {
         agent.setStatus(newStatus);
         if (newStatus == AgentStatus.BUSY) {
             agent.setLastAssignedTime(Instant.now().toEpochMilli());
+        } else if (newStatus == AgentStatus.OFFLINE) {
+            agent.setActiveCallId(null);
         }
 
         agent = agentRepository.save(agent);
@@ -98,7 +100,12 @@ public class AgentStateService {
 
         for (Agent agent : expiredAgents) {
             AgentStatus oldStatus = agent.getStatus();
+            if (oldStatus == AgentStatus.BUSY && agent.getActiveCallId() != null) {
+                log.info("Agent {} was BUSY with call {}. Disconnecting.", agent.getId(), agent.getActiveCallId());
+            }
+
             agent.setStatus(AgentStatus.OFFLINE);
+            agent.setActiveCallId(null);
             agentRepository.save(agent);
 
             updateRedisState(agent, oldStatus, AgentStatus.OFFLINE);
@@ -137,6 +144,7 @@ public class AgentStateService {
         
         // Update DB
         agent.setStatus(AgentStatus.BUSY);
+        agent.setActiveCallId(event.getCallId());
         agent.setLastAssignedTime(Instant.now().toEpochMilli());
         agentRepository.save(agent);
 
@@ -164,6 +172,7 @@ public class AgentStateService {
 
         // Update DB
         agent.setStatus(AgentStatus.AVAILABLE);
+        agent.setActiveCallId(null);
         agentRepository.save(agent);
 
         // Update Redis (Release agent)
@@ -220,6 +229,7 @@ public class AgentStateService {
                 .tenantId(agent.getTenantId())
                 .previousStatus(oldStatus != null ? oldStatus.name() : null)
                 .newStatus(newStatus.name())
+                .callId(agent.getActiveCallId())
                 .timestamp(Instant.now())
                 .build();
         agentEventProducer.publishAgentEvent(event);

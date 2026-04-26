@@ -36,11 +36,16 @@ export class WebsocketService {
     };
   }
 
+  private connected = false;
+
   connect() {
+    if (this.connected) return; // Prevent duplicate connections
+    this.connected = true;
     this.stompClient.activate();
   }
 
   disconnect() {
+    this.connected = false;
     this.stompClient.deactivate();
   }
 }

@@ -1,4 +1,4 @@
-package com.minigenesys.agentstate.dto;
+package com.minigenesys.callservice.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

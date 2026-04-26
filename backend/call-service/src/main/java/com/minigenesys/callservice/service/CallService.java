@@ -12,6 +12,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.Arrays;
+import java.util.List;
 import com.minigenesys.callservice.dto.CallLifecycleEvent;
 
 @Slf4j
@@ -139,6 +141,44 @@ public class CallService {
 
         callRepository.save(call);
         log.info("Updated callId: {} to status: {}", call.getId(), call.getStatus());
+    }
+
+    @Transactional
+    public void handleAgentDisconnect(AgentEvent event) {
+        if (!"AGENT_DISCONNECTED".equals(event.getEventType())) {
+            return;
+        }
+
+        log.info("Handling disconnect for agent: {} in tenant: {}. Searching for active calls to recover.", 
+            event.getAgentId(), event.getTenantId());
+
+        List<CallStatus> activeStatuses = Arrays.asList(CallStatus.ROUTED, CallStatus.IN_PROGRESS);
+        List<Call> activeCalls = callRepository.findByAssignedAgentIdAndStatusIn(event.getAgentId(), activeStatuses);
+
+        if (activeCalls.isEmpty()) {
+            log.info("No active calls found for disconnected agent: {}", event.getAgentId());
+            return;
+        }
+
+        for (Call call : activeCalls) {
+            log.info("Recovering call: {} from disconnected agent: {}. Requeuing.", 
+                call.getId(), event.getAgentId());
+
+            call.setStatus(CallStatus.QUEUED);
+            call.setAssignedAgentId(null);
+            callRepository.save(call);
+
+            // Publish CALL_REQUEUED (same as initial call event but for routing-service to pick it up)
+            CallEvent requeueEvent = CallEvent.builder()
+                    .callId(call.getId())
+                    .tenantId(call.getTenantId())
+                    .requiredSkills(call.getRequiredSkills())
+                    .priority(call.getPriority())
+                    .build();
+
+            callEventProducer.publishCallEvent(requeueEvent);
+            log.info("Call {} requeued and published to Kafka", call.getId());
+        }
     }
 
     private CallResponse mapToResponse(Call call) {
