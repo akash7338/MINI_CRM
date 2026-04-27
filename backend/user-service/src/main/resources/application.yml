@@ -26,3 +26,6 @@ jwt:
 logging:
   level:
     com.minigenesys.userservice: DEBUG
+
+auth:
+  internal-key: ${INTERNAL_KEY:minigenesys-internal-secret-2024}

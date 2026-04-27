@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -32,7 +33,12 @@ public class UserService {
     // In a real microservices setup, you'd use a configured WebClient or Feign,
     // but a RestTemplate is fine for this clean integration point.
     private final RestTemplate restTemplate = new RestTemplate();
-    private final String agentStateServiceUrl = "http://localhost:8086/api/v1/agents/internal";
+    
+    @Value("${services.agent-state.url:http://localhost:8086/api/v1/agents/internal}")
+    private String agentStateServiceUrl;
+
+    @Value("${auth.internal-key}")
+    private String internalKey;
 
     @Transactional
     public void createSupervisor(CreateSupervisorRequest request) {
@@ -77,6 +83,7 @@ public class UserService {
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.set("X-Tenant-Id", tenantId);
+            headers.set("X-Internal-Key", internalKey);
             
             Map<String, Object> body = new HashMap<>();
             body.put("agentId", request.getAgentId());

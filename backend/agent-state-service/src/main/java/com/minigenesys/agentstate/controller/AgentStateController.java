@@ -8,6 +8,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import com.minigenesys.agentstate.dto.CreateAgentRequest;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.util.Map;
 
@@ -16,12 +17,19 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class AgentStateController {
 
-    private final AgentStateService agentStateService;
+    @Value("${auth.internal-key}")
+    private String internalKey;
 
     @PostMapping("/internal")
     public ResponseEntity<AgentStateResponse> createAgent(
+            @RequestHeader(value = "X-Internal-Key", required = false) String providedKey,
             @RequestHeader("X-Tenant-Id") String tenantId,
             @Valid @RequestBody CreateAgentRequest request) {
+        
+        if (providedKey == null || !providedKey.equals(internalKey)) {
+            return ResponseEntity.status(401).build();
+        }
+        
         return ResponseEntity.ok(agentStateService.createAgent(tenantId, request));
     }
 
