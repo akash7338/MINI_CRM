@@ -21,9 +21,11 @@ public class AgentEventProducer {
         try {
             String message = objectMapper.writeValueAsString(event);
             log.info("Publishing agent event: {}", message);
-            kafkaTemplate.send(AGENT_EVENTS_TOPIC, event.getTenantId(), message);
+            // Block to ensure publish success
+            kafkaTemplate.send(AGENT_EVENTS_TOPIC, event.getTenantId(), message).get();
         } catch (Exception e) {
             log.error("Failed to serialize and publish agent event", e);
+            throw new RuntimeException("Kafka publish failed", e);
         }
     }
 }

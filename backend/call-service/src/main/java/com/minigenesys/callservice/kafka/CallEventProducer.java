@@ -23,9 +23,11 @@ public class CallEventProducer {
         try {
             String message = objectMapper.writeValueAsString(event);
             log.info("Publishing call event: {}", message);
-            kafkaTemplate.send(CALL_EVENTS_TOPIC, event.getTenantId(), message);
+            // Block to ensure publish success so transaction can rollback if it fails
+            kafkaTemplate.send(CALL_EVENTS_TOPIC, event.getTenantId(), message).get();
         } catch (Exception e) {
             log.error("Failed to serialize and publish call event", e);
+            throw new RuntimeException("Kafka publish failed", e);
         }
     }
 
@@ -33,9 +35,11 @@ public class CallEventProducer {
         try {
             String message = objectMapper.writeValueAsString(event);
             log.info("Publishing call lifecycle event: {}", message);
-            kafkaTemplate.send(CALL_LIFECYCLE_EVENTS_TOPIC, event.getTenantId(), message);
+            // Block to ensure publish success
+            kafkaTemplate.send(CALL_LIFECYCLE_EVENTS_TOPIC, event.getTenantId(), message).get();
         } catch (Exception e) {
             log.error("Failed to serialize and publish call lifecycle event", e);
+            throw new RuntimeException("Kafka publish failed", e);
         }
     }
 }

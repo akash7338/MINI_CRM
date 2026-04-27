@@ -46,9 +46,11 @@ public class KafkaMessaging {
         log.info("Producing routing event for callId: {}, status: {}", result.getCallId(), result.getStatus());
         try {
             String message = objectMapper.writeValueAsString(result);
-            kafkaTemplate.send(ROUTING_EVENTS_TOPIC, result.getTenantId(), message);
+            // Block to ensure publish success
+            kafkaTemplate.send(ROUTING_EVENTS_TOPIC, result.getTenantId(), message).get();
         } catch (Exception e) {
             log.error("Failed to serialize routing result: ", e);
+            throw new RuntimeException("Kafka publish failed", e);
         }
     }
 }
