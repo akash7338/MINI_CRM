@@ -16,18 +16,21 @@ export class WebsocketService {
 
   constructor() {
     this.stompClient = new Client({
-      webSocketFactory: () => new SockJS('http://localhost:8088/ws'),
+      webSocketFactory: () => new SockJS('http://localhost:8080/ws'),
       debug: (msg: string) => console.log(msg),
       reconnectDelay: 5000,
     });
 
     this.stompClient.onConnect = (frame) => {
       console.log('Connected: ' + frame);
-      this.stompClient.subscribe('/topic/events/tenant1', (message) => {
-        if (message.body) {
-          this.eventsSubject.next(JSON.parse(message.body));
-        }
-      });
+      const tenantId = localStorage.getItem('tenantId');
+      if (tenantId) {
+        this.stompClient.subscribe(`/topic/events/${tenantId}`, (message) => {
+          if (message.body) {
+            this.eventsSubject.next(JSON.parse(message.body));
+          }
+        });
+      }
     };
 
     this.stompClient.onStompError = (frame) => {
@@ -39,7 +42,16 @@ export class WebsocketService {
   private connected = false;
 
   connect() {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
     if (this.connected) return; // Prevent duplicate connections
+    
+    // Set headers before activation
+    this.stompClient.connectHeaders = {
+      'Authorization': `Bearer ${token}`
+    };
+
     this.connected = true;
     this.stompClient.activate();
   }

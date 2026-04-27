@@ -32,18 +32,19 @@
             console.log(message);
         }
 
-        const socket = new SockJS('http://localhost:8088/ws');
+        // Note: In production, the token should be obtained from login
+        const socket = new SockJS('http://localhost:8080/ws');
         const stompClient = Stomp.over(socket);
 
-        stompClient.connect({}, function (frame) {
+        // Add Authorization header here when testing manually
+        const headers = {
+            // Authorization: 'Bearer <TOKEN>'
+        };
+
+        stompClient.connect(headers, function (frame) {
             statusEl.textContent = 'Status: Connected';
             statusEl.className = 'status connected';
             log('Connected: ' + frame);
-
-            // Subscribe to Global Events
-            stompClient.subscribe('/topic/events', function (event) {
-                log('GLOBAL: ' + event.body, 'event-global');
-            });
 
             // Subscribe to Tenant1 Events
             stompClient.subscribe('/topic/events/tenant1', function (event) {
