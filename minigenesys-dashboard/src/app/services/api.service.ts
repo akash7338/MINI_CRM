@@ -30,6 +30,10 @@ export class ApiService {
     return this.agentIdSubject.value;
   }
 
+  get tenantId() {
+    return localStorage.getItem('tenantId');
+  }
+
   private isRefreshing = false;
 
   login(credentials: any): Observable<any> {

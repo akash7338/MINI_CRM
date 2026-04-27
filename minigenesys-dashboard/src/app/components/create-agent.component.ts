@@ -72,7 +72,11 @@ export class CreateAgentComponent {
     this.errorMsg = '';
     
     this.form.skills = this.skillsString.split(',').map(s => s.trim()).filter(s => s);
-    const tenantId = localStorage.getItem('tenantId') || 'tenant1';
+    const tenantId = this.api.tenantId;
+    if (!tenantId) {
+      this.errorMsg = 'No tenant context found.';
+      return;
+    }
 
     this.api.createAgent(tenantId, this.form).subscribe({
       next: () => {

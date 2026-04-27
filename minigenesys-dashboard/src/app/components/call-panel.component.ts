@@ -45,7 +45,7 @@ import { Subscription } from 'rxjs';
           </div>
           <div>
             <div style="font-size: 13px; font-weight: 600; color: var(--text-main);">Sales Queue</div>
-            <div style="font-size: 11px; color: var(--text-muted);">Incoming from tenant1</div>
+            <div style="font-size: 11px; color: var(--text-muted);">Incoming from {{ api.tenantId }}</div>
           </div>
         </div>
       </div>
@@ -112,7 +112,12 @@ export class CallPanelComponent implements OnInit, OnDestroy {
 
   createCall() {
     this.error = null;
-    this.api.createCall('tenant1', 'sales').subscribe({
+    const tenantId = this.api.tenantId;
+    if (!tenantId) {
+      this.error = 'No tenant context found. Please re-login.';
+      return;
+    }
+    this.api.createCall(tenantId, 'sales').subscribe({
       next: (res) => {
         this.session.setCall(res.callId, res.status);
       },

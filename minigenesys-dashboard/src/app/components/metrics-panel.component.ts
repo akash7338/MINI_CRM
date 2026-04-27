@@ -24,7 +24,7 @@ import { ApiService } from '../services/api.service';
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
           </div>
           <div class="kpi-value">{{ metrics?.totalCalls || 0 }}</div>
-          <div style="margin-top: 8px; font-size: 12px; color: var(--success); font-weight: 600;">+12% from last hour</div>
+          <div style="margin-top: 8px; font-size: 12px; color: var(--text-muted); font-weight: 600;">—</div>
         </div>
 
         <div class="card">
@@ -32,19 +32,19 @@ import { ApiService } from '../services/api.service';
           <div class="kpi-value" [style.color]="(metrics?.queuedCalls || 0) > 5 ? 'var(--danger)' : 'var(--warning)'">
             {{ metrics?.queuedCalls || 0 }}
           </div>
-          <div style="margin-top: 8px; font-size: 12px; color: var(--text-muted);">Avg. wait: 2m 14s</div>
+          <div style="margin-top: 8px; font-size: 12px; color: var(--text-muted);">—</div>
         </div>
 
         <div class="card">
           <div class="kpi-label">Active Agents</div>
           <div class="kpi-value">{{ metrics?.activeAgents || 0 }}</div>
-          <div style="margin-top: 8px; font-size: 12px; color: var(--text-muted);">Capacity: 84%</div>
+          <div style="margin-top: 8px; font-size: 12px; color: var(--text-muted);">—</div>
         </div>
 
         <div class="card">
           <div class="kpi-label">Completed</div>
           <div class="kpi-value" style="color: var(--success);">{{ metrics?.completedCalls || 0 }}</div>
-          <div style="margin-top: 8px; font-size: 12px; color: var(--success); font-weight: 600;">98% CSAT Score</div>
+          <div style="margin-top: 8px; font-size: 12px; color: var(--text-muted); font-weight: 600;">—</div>
         </div>
       </div>
     </div>
@@ -68,7 +68,9 @@ export class MetricsPanelComponent implements OnInit, OnDestroy {
   }
 
   fetchMetrics() {
-    this.api.getMetrics('tenant1').subscribe({
+    const tenantId = this.api.tenantId;
+    if (!tenantId) return;
+    this.api.getMetrics(tenantId).subscribe({
       next: (res) => {
         this.metrics = res;
         this.loading = false;
