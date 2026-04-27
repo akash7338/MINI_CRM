@@ -20,6 +20,8 @@ public class AgentStateController {
     @Value("${auth.internal-key}")
     private String internalKey;
 
+    private final AgentStateService agentStateService;
+
     @PostMapping("/internal")
     public ResponseEntity<AgentStateResponse> createAgent(
             @RequestHeader(value = "X-Internal-Key", required = false) String providedKey,
