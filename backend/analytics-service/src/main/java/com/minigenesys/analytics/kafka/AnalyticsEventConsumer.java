@@ -22,24 +22,19 @@ public class AnalyticsEventConsumer {
         topics = {"call-events", "routing-events", "agent-events", "call-lifecycle-events"},
         groupId = "analytics-service-group"
     )
-    public void consume(String message, @Header(KafkaHeaders.RECEIVED_TOPIC) String topic) {
+    public void consume(String message, @Header(KafkaHeaders.RECEIVED_TOPIC) String topic) throws Exception {
         log.debug("Consumed event from topic {}: {}", topic, message);
 
-        try {
-            JsonNode node = objectMapper.readTree(message);
-            String tenantId = node.has("tenantId") ? node.get("tenantId").asText() : null;
+        JsonNode node = objectMapper.readTree(message);
+        String tenantId = node.has("tenantId") ? node.get("tenantId").asText() : null;
 
-            if (tenantId == null) return;
+        if (tenantId == null) return;
 
-            switch (topic) {
-                case "call-events" -> handleCallEvent(tenantId, node);
-                case "routing-events" -> handleRoutingEvent(tenantId, node);
-                case "agent-events" -> handleAgentEvent(tenantId, node);
-                case "call-lifecycle-events" -> handleLifecycleEvent(tenantId, node);
-            }
-
-        } catch (Exception e) {
-            log.error("Error processing event from topic {}: {}", topic, e.getMessage());
+        switch (topic) {
+            case "call-events" -> handleCallEvent(tenantId, node);
+            case "routing-events" -> handleRoutingEvent(tenantId, node);
+            case "agent-events" -> handleAgentEvent(tenantId, node);
+            case "call-lifecycle-events" -> handleLifecycleEvent(tenantId, node);
         }
     }
 

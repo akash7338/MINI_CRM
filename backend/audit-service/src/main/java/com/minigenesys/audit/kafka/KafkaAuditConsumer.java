@@ -25,43 +25,38 @@ public class KafkaAuditConsumer {
             groupId = "audit-service-group"
     )
     @Transactional
-    public void consume(String message, @Header(KafkaHeaders.RECEIVED_TOPIC) String topic) {
+    public void consume(String message, @Header(KafkaHeaders.RECEIVED_TOPIC) String topic) throws Exception {
         log.debug("Consuming event from topic {}: {}", topic, message);
 
-        try {
-            JsonNode node = objectMapper.readTree(message);
+        JsonNode node = objectMapper.readTree(message);
 
-            String tenantId = node.has("tenantId") ? node.get("tenantId").asText() : null;
-            String eventType = node.has("eventType") ? node.get("eventType").asText() : topic;
-            
-            // Extract some common entity IDs if present
-            String entityId = null;
-            String entityType = null;
-            if (node.has("callId")) {
-                entityId = node.get("callId").asText();
-                entityType = "CALL";
-            } else if (node.has("agentId")) {
-                entityId = node.get("agentId").asText();
-                entityType = "AGENT";
-            } else if (node.has("userId")) {
-                entityId = node.get("userId").asText();
-                entityType = "USER";
-            }
-
-            AuditEvent event = AuditEvent.builder()
-                    .tenantId(tenantId)
-                    .eventType(eventType)
-                    .sourceService(getSourceService(topic))
-                    .entityType(entityType)
-                    .entityId(entityId)
-                    .payloadJson(message)
-                    .build();
-
-            auditRepository.save(event);
-
-        } catch (Exception e) {
-            log.error("Error processing audit event from topic {}: {}", topic, e.getMessage(), e);
+        String tenantId = node.has("tenantId") ? node.get("tenantId").asText() : null;
+        String eventType = node.has("eventType") ? node.get("eventType").asText() : topic;
+        
+        // Extract some common entity IDs if present
+        String entityId = null;
+        String entityType = null;
+        if (node.has("callId")) {
+            entityId = node.get("callId").asText();
+            entityType = "CALL";
+        } else if (node.has("agentId")) {
+            entityId = node.get("agentId").asText();
+            entityType = "AGENT";
+        } else if (node.has("userId")) {
+            entityId = node.get("userId").asText();
+            entityType = "USER";
         }
+
+        AuditEvent event = AuditEvent.builder()
+                .tenantId(tenantId)
+                .eventType(eventType)
+                .sourceService(getSourceService(topic))
+                .entityType(entityType)
+                .entityId(entityId)
+                .payloadJson(message)
+                .build();
+
+        auditRepository.save(event);
     }
 
     private String getSourceService(String topic) {
