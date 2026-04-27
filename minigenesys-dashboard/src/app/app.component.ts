@@ -9,6 +9,8 @@ import { EventLogComponent } from './components/event-log.component';
 import { RecentCallsComponent } from './components/recent-calls.component';
 import { LoginComponent } from './components/login.component';
 import { CreateAgentComponent } from './components/create-agent.component';
+import { TelephonyOverlayComponent } from './components/telephony/telephony-overlay.component';
+import { TelephonyService } from './services/telephony.service';
 
 @Component({
   selector: 'app-root',
@@ -21,11 +23,13 @@ import { CreateAgentComponent } from './components/create-agent.component';
     EventLogComponent,
     RecentCallsComponent,
     LoginComponent,
-    CreateAgentComponent
+    CreateAgentComponent,
+    TelephonyOverlayComponent
   ],
   template: `
     <div class="app-layout">
-      <!-- Sidebar -->
+      <!-- ... existing template ... -->
+      <app-telephony-overlay></app-telephony-overlay>
       <aside class="app-sidebar">
         <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 40px; padding: 0 16px;">
           <div style="width: 32px; height: 32px; background: var(--primary); border-radius: 8px; display: flex; align-items: center; justify-content: center;">
@@ -155,7 +159,7 @@ export class AppComponent {
   view = 'overview';
   currentAgentId = '';
 
-  constructor(private api: ApiService, private session: SessionStateService) {
+  constructor(private api: ApiService, private session: SessionStateService, private telephony: TelephonyService) {
     const token = localStorage.getItem('token');
     const role = localStorage.getItem('role');
     
@@ -167,10 +171,20 @@ export class AppComponent {
       const agentId = localStorage.getItem('agentId');
       if (agentId) {
         this.api.setAgentId(agentId);
+        if (role === 'AGENT') {
+          this.telephony.initialize(agentId);
+        }
       }
     }
 
     this.session.agent$.subscribe(state => this.currentAgentId = state.agentId);
+
+    // Reactively initialize telephony when agent ID is set (e.g. after login)
+    this.api.agentId$.subscribe(agentId => {
+      if (agentId && this.role === 'AGENT') {
+        this.telephony.initialize(agentId);
+      }
+    });
   }
 
   logout() {
