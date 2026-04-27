@@ -1,0 +1,38 @@
+spring:
+  application:
+    name: telephony-service
+  
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/minigenesys_telephony}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+  
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  kafka:
+    bootstrap-servers: ${KAFKA_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
+server:
+  port: 8092
+
+twilio:
+  accountSid: ${TWILIO_ACCOUNT_SID}
+  authToken: ${TWILIO_AUTH_TOKEN}
+  phoneNumber: ${TWILIO_PHONE_NUMBER}
+
+services:
+  callServiceUrl: ${CALL_SERVICE_URL:http://localhost:8087}
+
+logging:
+  level:
+    com.minigenesys.telephony: DEBUG
