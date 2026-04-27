@@ -6,4 +6,5 @@ import java.util.Optional;
 
 public interface TelephonyRepository extends JpaRepository<TelephonyCallSession, String> {
     Optional<TelephonyCallSession> findByTwilioCallSid(String twilioCallSid);
+    Optional<TelephonyCallSession> findByInternalCallId(String internalCallId);
 }

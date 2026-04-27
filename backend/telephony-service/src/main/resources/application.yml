@@ -26,9 +26,10 @@ server:
   port: 8092
 
 twilio:
-  accountSid: ${TWILIO_ACCOUNT_SID}
-  authToken: ${TWILIO_AUTH_TOKEN}
-  phoneNumber: ${TWILIO_PHONE_NUMBER}
+  accountSid: ${TWILIO_ACCOUNT_SID:AC00000000000000000000000000000000}
+  apiKeySid: ${TWILIO_API_KEY_SID:SK00000000000000000000000000000000}
+  apiKeySecret: ${TWILIO_API_KEY_SECRET:api_key_secret_dummy_value_32_chars_long}
+  twimlAppSid: ${TWILIO_TWIML_APP_SID:AP00000000000000000000000000000000}
 
 services:
   callServiceUrl: ${CALL_SERVICE_URL:http://localhost:8087}

@@ -25,10 +25,20 @@ public class TelephonyController {
 
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
                "<Response>\n" +
-               "    <Say>Please wait while we connect you to an agent</Say>\n" +
-               "    <Pause length=\"1\"/>\n" +
-               "    <Redirect>/api/v1/telephony/twilio/wait?callSid=" + callSid + "</Redirect>\n" +
+               "    <Say>Please wait while we connect you to an agent.</Say>\n" +
+               "    <Pause length=\"3\"/>\n" +
+               "    <Redirect method=\"GET\">/api/v1/telephony/twilio/bridge?callSid=" + callSid + "</Redirect>\n" +
                "</Response>";
+    }
+
+    @GetMapping(value = "/twilio/bridge", produces = MediaType.APPLICATION_XML_VALUE)
+    public String bridge(@RequestParam("callSid") String callSid) {
+        return telephonyService.getBridgeTwiml(callSid);
+    }
+
+    @GetMapping("/twilio/token")
+    public ResponseEntity<Map<String, String>> getToken(@RequestParam("agentId") String agentId) {
+        return ResponseEntity.ok(telephonyService.generateToken(agentId));
     }
 
     @PostMapping("/twilio/status")

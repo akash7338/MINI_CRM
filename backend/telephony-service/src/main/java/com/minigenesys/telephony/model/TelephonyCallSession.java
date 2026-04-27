@@ -28,6 +28,8 @@ public class TelephonyCallSession {
     @Column(nullable = false)
     private String internalCallId;
 
+    private String assignedAgentId;
+
     private String fromNumber;
     private String toNumber;
     private String status;
