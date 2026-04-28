@@ -171,9 +171,6 @@ export class AppComponent {
       const agentId = localStorage.getItem('agentId');
       if (agentId) {
         this.api.setAgentId(agentId);
-        if (role === 'AGENT') {
-          this.telephony.initialize(agentId);
-        }
       }
     }
 
@@ -183,6 +180,15 @@ export class AppComponent {
     this.api.agentId$.subscribe(agentId => {
       if (agentId && this.role === 'AGENT') {
         this.telephony.initialize(agentId);
+      }
+    });
+
+    // Handle successful login from LoginComponent
+    this.api.loginSuccess$.subscribe(success => {
+      if (success) {
+        this.isLoggedIn = true;
+        this.role = localStorage.getItem('role') || '';
+        this.view = this.role === 'SUPERVISOR' ? 'overview' : 'workspace';
       }
     });
   }

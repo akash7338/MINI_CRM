@@ -8,8 +8,11 @@ import { Observable, tap, BehaviorSubject } from 'rxjs';
 export class ApiService {
   private readonly GATEWAY_URL = 'http://localhost:8080';
   
-  private agentIdSubject = new BehaviorSubject<string>('agent-ui-1');
+  private agentIdSubject = new BehaviorSubject<string>('');
   agentId$ = this.agentIdSubject.asObservable();
+
+  private loginSuccessSubject = new BehaviorSubject<boolean>(false);
+  loginSuccess$ = this.loginSuccessSubject.asObservable();
 
   constructor(private http: HttpClient) {}
 
@@ -47,6 +50,7 @@ export class ApiService {
             localStorage.setItem('agentId', res.agentId);
             this.setAgentId(res.agentId);
           }
+          this.loginSuccessSubject.next(true);
         }
       })
     );

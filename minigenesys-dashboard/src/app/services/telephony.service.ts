@@ -14,6 +14,7 @@ export interface TelephonyToken {
 export class TelephonyService {
   private readonly GATEWAY_URL = 'http://localhost:8080';
   private device: Device | null = null;
+  private initPromise: Promise<void> | null = null;
   
   private activeCallSubject = new BehaviorSubject<Call | null>(null);
   activeCall$ = this.activeCallSubject.asObservable();
@@ -24,10 +25,19 @@ export class TelephonyService {
   constructor(private http: HttpClient) {}
 
   async initialize(agentId: string): Promise<void> {
-    const res = await this.http.get<TelephonyToken>(`${this.GATEWAY_URL}/api/v1/telephony/twilio/token?agentId=${agentId}`).toPromise();
-    if (!res) return;
+    if (this.device) return;
+    if (this.initPromise) return this.initPromise;
 
-    this.device = new Device(res.token, {
+    this.initPromise = this._initialize(agentId);
+    return this.initPromise;
+  }
+
+  private async _initialize(agentId: string): Promise<void> {
+    try {
+      const res = await this.http.get<TelephonyToken>(`${this.GATEWAY_URL}/api/v1/telephony/twilio/token?agentId=${agentId}`).toPromise();
+      if (!res) return;
+
+      this.device = new Device(res.token, {
       logLevel: 'debug',
       edge: 'ashburn'
     });
@@ -49,7 +59,12 @@ export class TelephonyService {
       });
     });
 
-    await this.device.register();
+      await this.device.register();
+    } catch (error) {
+      console.error('Telephony initialization failed:', error);
+      this.initPromise = null;
+      throw error;
+    }
   }
 
   acceptCall(call: Call) {

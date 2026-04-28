@@ -87,7 +87,15 @@ public class TelephonyService {
         });
     }
 
+    private final Map<String, Map<String, String>> tokenCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<String, Long> tokenExpiry = new java.util.concurrent.ConcurrentHashMap<>();
+
     public Map<String, String> generateToken(String identity) {
+        long now = System.currentTimeMillis();
+        if (tokenCache.containsKey(identity) && now < tokenExpiry.get(identity)) {
+            return tokenCache.get(identity);
+        }
+
         log.info("Generating token for identity: {}", identity);
 
         VoiceGrant grant = new VoiceGrant();
@@ -99,10 +107,15 @@ public class TelephonyService {
                 .grant(grant)
                 .build();
 
-        return Map.of(
+        Map<String, String> result = Map.of(
             "token", token.toJwt(),
             "identity", identity
         );
+
+        tokenCache.put(identity, result);
+        tokenExpiry.put(identity, now + 5000); // Cache for 5 seconds
+
+        return result;
     }
 
 

@@ -56,7 +56,7 @@ export class LoginComponent {
     this.error = '';
     this.api.login(this.credentials).subscribe({
       next: () => {
-        window.location.reload();
+        this.loading = false;
       },
       error: (err) => {
         this.loading = false;
