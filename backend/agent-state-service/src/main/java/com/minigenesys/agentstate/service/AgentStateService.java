@@ -63,6 +63,9 @@ public class AgentStateService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Agent not found"));
 
         AgentStatus oldStatus = agent.getStatus();
+        if (oldStatus == newStatus) {
+            return mapToResponse(agent);
+        }
 
         if (!isValidTransition(oldStatus, newStatus)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Invalid state transition from " + oldStatus + " to " + newStatus);
