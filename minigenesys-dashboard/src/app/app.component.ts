@@ -158,6 +158,7 @@ export class AppComponent {
   role = '';
   view = 'overview';
   currentAgentId = '';
+  private loggingOut = false;
 
   constructor(private api: ApiService, private session: SessionStateService, private telephony: TelephonyService) {
     const token = localStorage.getItem('token');
@@ -194,14 +195,16 @@ export class AppComponent {
   }
 
   logout() {
+    if (this.loggingOut) return;
+    this.loggingOut = true;
+
     const agentId = localStorage.getItem('agentId');
     const role = localStorage.getItem('role');
     
     if (role === 'AGENT' && agentId) {
-      // Set to OFFLINE on backend before clearing local state
       this.api.logoutAgent(agentId).subscribe({
         next: () => this.finalizeLogout(),
-        error: () => this.finalizeLogout() // Logout anyway on error
+        error: () => this.finalizeLogout()
       });
     } else {
       this.finalizeLogout();
@@ -211,6 +214,6 @@ export class AppComponent {
   private finalizeLogout() {
     this.api.logout();
     this.isLoggedIn = false;
-    window.location.reload();
+    this.loggingOut = false;
   }
 }
