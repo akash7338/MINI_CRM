@@ -16,7 +16,7 @@ import { Subscription } from 'rxjs';
           <p style="margin: 4px 0 0 0; font-size: 13px; color: var(--text-muted);">Manage active interactions</p>
         </div>
         <span *ngIf="callStatus" class="status-badge" [ngClass]="getStatusClass()">
-          {{ callStatus }}
+          {{ getDisplayStatus() }}
         </span>
       </div>
 
@@ -104,9 +104,21 @@ export class CallPanelComponent implements OnInit, OnDestroy {
     switch (this.callStatus) {
       case 'QUEUED': return 'status-badge status-queued';
       case 'ROUTED': return 'status-badge status-progress';
+      case 'ASSIGNED': return 'status-badge status-progress';
       case 'IN_PROGRESS': return 'status-badge status-progress';
       case 'CALL_COMPLETED': return 'status-badge status-available';
       default: return 'status-badge status-offline';
+    }
+  }
+
+  getDisplayStatus() {
+    switch (this.callStatus) {
+      case 'QUEUED': return 'In Queue';
+      case 'ROUTED': return 'Call Assigned';
+      case 'ASSIGNED': return 'Call Assigned';
+      case 'IN_PROGRESS': return 'Active Call';
+      case 'CALL_COMPLETED': return 'Completed';
+      default: return this.callStatus || 'Idle';
     }
   }
 

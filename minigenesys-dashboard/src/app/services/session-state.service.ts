@@ -19,7 +19,7 @@ export interface CallState {
 export class SessionStateService implements OnDestroy {
   // --- Agent State ---
   private agentSubject = new BehaviorSubject<AgentState>({
-    agentId: 'agent-ui-1',
+    agentId: '',
     status: 'Offline'
   });
   agent$ = this.agentSubject.asObservable();
@@ -48,9 +48,16 @@ export class SessionStateService implements OnDestroy {
     // Subscribe to WebSocket events ONCE at the service level.
     // This subscription lives for the entire app lifetime.
     this.wsSub = this.ws.events$.subscribe(event => {
+      console.log('[SessionState] WebSocket Event Received:', event);
       this.handleEvent(event);
       this.addToHistory(event);
     });
+
+    // Sync agent ID from storage if available
+    const storedAgentId = localStorage.getItem('agentId');
+    if (storedAgentId) {
+      this.patchAgent({ agentId: storedAgentId });
+    }
   }
 
   private addToHistory(event: any) {
@@ -71,11 +78,14 @@ export class SessionStateService implements OnDestroy {
 
   // --- Agent Actions ---
   setAgentId(id: string) {
+    console.log('[SessionState] Setting Agent ID:', id);
     this.patchAgent({ agentId: id });
     this.api.setAgentId(id);
+    localStorage.setItem('agentId', id);
   }
 
   setAgentStatus(status: string) {
+    console.log('[SessionState] Setting Agent Status:', status);
     this.patchAgent({ status });
     if (status === 'Offline') {
       this.stopHeartbeat();
@@ -119,10 +129,12 @@ export class SessionStateService implements OnDestroy {
 
   // --- Call Actions ---
   setCall(callId: string | null, status: string | null) {
+    console.log('[SessionState] Updating Call State:', { callId, status });
     this.callSubject.next({ callId, status });
   }
 
   clearCall() {
+    console.log('[SessionState] Clearing Call State');
     this.callSubject.next({ callId: null, status: null });
   }
 
@@ -136,14 +148,9 @@ export class SessionStateService implements OnDestroy {
 
     if (topic === 'agent-events') {
       if (payload.agentId === currentAgentId) {
-        // Backend sends eventType like AGENT_BUSY, AGENT_AVAILABLE, AGENT_DISCONNECTED
-        // and may also send newStatus with raw status values
         const rawStatus = payload.eventType || payload.newStatus || '';
         const newStatus = this.mapAgentStatus(rawStatus);
         
-        // Guard: Do NOT go Offline if we have an active call (ROUTED / IN_PROGRESS).
-        // The backend may send AGENT_DISCONNECTED due to heartbeat race conditions
-        // even while the agent has an active call assignment.
         if (newStatus === 'Offline' && this.call.callId) {
           const callStatus = this.call.status;
           if (callStatus === 'ROUTED' || callStatus === 'IN_PROGRESS' || callStatus === 'QUEUED') {
@@ -155,14 +162,16 @@ export class SessionStateService implements OnDestroy {
         this.setAgentStatus(newStatus);
       }
     } else if (topic === 'routing-events') {
-      if (payload.status === 'ASSIGNED' && payload.agentId === currentAgentId) {
+      // 1. Check if the assignment is for THIS agent
+      const isForMe = payload.agentId === currentAgentId;
+      
+      if (isForMe && (payload.status === 'ASSIGNED' || payload.status === 'ROUTED')) {
+        console.log('[SessionState] Call Assigned to ME:', payload.callId);
         this.setAgentStatus('On Call');
-        if (payload.callId) {
-          this.setCall(payload.callId, 'ROUTED');
-        }
-      }
-      // Also update call status if it matches
-      if (payload.callId === this.call.callId && payload.status === 'ROUTED') {
+        this.setCall(payload.callId, 'ROUTED');
+      } 
+      // 2. Also handle general status updates for the call we are currently tracking
+      else if (payload.callId === this.call.callId && payload.status === 'ROUTED') {
         this.setCall(this.call.callId, 'ROUTED');
       }
     } else if (topic === 'call-lifecycle-events') {
