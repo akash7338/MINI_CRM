@@ -1,6 +1,7 @@
 package com.minigenesys.routing.kafka;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.minigenesys.routing.dto.AgentEvent;
 import com.minigenesys.routing.dto.AssignmentResult;
 import com.minigenesys.routing.dto.CallRequest;
 import com.minigenesys.routing.service.QueueManager;
@@ -23,6 +24,23 @@ public class KafkaMessaging {
 
     private static final String CALL_EVENTS_TOPIC = "call-events";
     private static final String ROUTING_EVENTS_TOPIC = "routing-events";
+    private static final String AGENT_EVENTS_TOPIC = "agent-events";
+
+    @KafkaListener(topics = AGENT_EVENTS_TOPIC, groupId = "routing-service-agent-group")
+    public void consumeAgentEvent(String message) {
+        log.info("Consumed agent event: {}", message);
+        try {
+            AgentEvent event = objectMapper.readValue(message, AgentEvent.class);
+            if ("AVAILABLE".equals(event.getNewStatus()) || "AGENT_AVAILABLE".equals(event.getEventType())) {
+                java.util.List<AssignmentResult> results = routingService.processQueue(event.getTenantId());
+                for (AssignmentResult result : results) {
+                    produceRoutingEvent(result);
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to process agent event: ", e);
+        }
+    }
 
     @KafkaListener(topics = CALL_EVENTS_TOPIC, groupId = "routing-service-group")
     public void consumeCallEvent(String message) {
