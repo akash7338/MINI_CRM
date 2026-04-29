@@ -22,9 +22,9 @@ public class RetryProcessor {
 
     private static final int MAX_RETRIES = 10;
 
-    // Fibonacci backoff delays in ms, indexed by retryCount (0-based)
+    // Faster retry delays for real-time contact center (max 5s)
     private static final long[] FIBONACCI_BACKOFF_MS = {
-        1000, 1000, 2000, 3000, 5000, 8000, 13000, 21000, 30000, 30000
+        1000, 1000, 2000, 2000, 3000, 3000, 5000, 5000, 5000, 5000
     };
 
     @Scheduled(fixedDelayString = "${routing.retry.interval:5000}")

@@ -244,6 +244,11 @@ public class AgentStateService {
     }
 
     private void publishEvent(Agent agent, AgentStatus oldStatus, AgentStatus newStatus, String eventType) {
+        // Only publish if the status actually changed or if it's a forced event type
+        if (oldStatus == newStatus && !"AGENT_DISCONNECTED".equals(eventType)) {
+            return;
+        }
+
         AgentEvent event = AgentEvent.builder()
                 .eventId(UUID.randomUUID().toString())
                 .eventType(eventType)
