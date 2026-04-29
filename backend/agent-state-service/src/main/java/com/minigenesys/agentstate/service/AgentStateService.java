@@ -270,6 +270,7 @@ public class AgentStateService {
                 .agentId(agent.getId())
                 .tenantId(agent.getTenantId())
                 .status(agent.getStatus())
+                .activeCallId(agent.getActiveCallId())
                 .lastAssignedTime(agent.getLastAssignedTime())
                 .build();
     }

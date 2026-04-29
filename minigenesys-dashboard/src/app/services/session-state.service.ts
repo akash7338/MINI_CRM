@@ -57,7 +57,35 @@ export class SessionStateService implements OnDestroy {
     const storedAgentId = localStorage.getItem('agentId');
     if (storedAgentId) {
       this.patchAgent({ agentId: storedAgentId });
+      this.loadInitialState(storedAgentId);
     }
+  }
+
+  private loadInitialState(agentId: string) {
+    console.log('[SessionState] Loading initial state for:', agentId);
+    this.api.getAgentState(agentId).subscribe({
+      next: (res) => {
+        console.log('[SessionState] Initial State Loaded:', res);
+        const uiStatus = this.mapAgentStatus(res.status);
+        this.setAgentStatus(uiStatus);
+        
+        if (res.activeCallId && res.tenantId) {
+          // Fetch the real status from call-service instead of guessing
+          this.api.getCall(res.activeCallId, res.tenantId).subscribe({
+            next: (callRes) => {
+              console.log('[SessionState] Restored Call Data:', callRes);
+              this.setCall(callRes.callId, callRes.status);
+            },
+            error: (err) => {
+              console.warn('[SessionState] Could not fetch active call details, falling back to basic state');
+              const fallbackStatus = uiStatus === 'On Call' ? 'ROUTED' : 'QUEUED';
+              this.setCall(res.activeCallId, fallbackStatus);
+            }
+          });
+        }
+      },
+      error: (err) => console.error('[SessionState] Failed to load initial state', err)
+    });
   }
 
   private addToHistory(event: any) {

@@ -14,5 +14,6 @@ public class AgentStateResponse {
     private String agentId;
     private String tenantId;
     private AgentStatus status;
+    private String activeCallId;
     private Long lastAssignedTime;
 }
