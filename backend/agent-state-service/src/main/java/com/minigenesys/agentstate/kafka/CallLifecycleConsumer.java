@@ -1,7 +1,7 @@
 package com.minigenesys.agentstate.kafka;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.minigenesys.agentstate.dto.CallLifecycleEvent;
+import com.minigenesys.common.dto.CallLifecycleEvent;
 import com.minigenesys.agentstate.service.AgentStateService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +28,7 @@ public class CallLifecycleConsumer {
             }
         } catch (Exception e) {
             log.error("Failed to process call lifecycle event: ", e);
+            throw new RuntimeException("Failed to process Kafka message, throwing to trigger DLQ", e);
         }
     }
 }

@@ -19,9 +19,10 @@ public class TelephonyController {
     public String handleInbound(
             @RequestParam("CallSid") String callSid,
             @RequestParam("From") String from,
-            @RequestParam("To") String to) {
+            @RequestParam("To") String to,
+            @RequestParam(value = "tenantId", defaultValue = "tenant1") String tenantId) {
         
-        telephonyService.handleInboundCall(callSid, from, to);
+        telephonyService.handleInboundCall(callSid, from, to, tenantId);
 
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
                "<Response>\n" +

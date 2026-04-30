@@ -1,6 +1,6 @@
 package com.minigenesys.apigateway.filter;
 
-import com.minigenesys.apigateway.util.JwtUtil;
+import com.minigenesys.common.util.JwtUtil;
 import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -105,7 +105,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
     }
 
     private boolean isSecured(String path) {
-        return OPEN_ENDPOINTS.stream().noneMatch(path::contains);
+        return OPEN_ENDPOINTS.stream().noneMatch(path::startsWith);
     }
 
     @Override

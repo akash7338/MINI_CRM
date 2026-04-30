@@ -1,7 +1,7 @@
 package com.minigenesys.callservice.kafka;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.minigenesys.callservice.dto.CallEvent;
+import com.minigenesys.common.dto.CallEvent;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;

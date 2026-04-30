@@ -1,10 +1,11 @@
 package com.minigenesys.userservice.service;
 
 import com.minigenesys.userservice.dto.*;
+import com.minigenesys.common.dto.*;
 import com.minigenesys.userservice.model.Role;
 import com.minigenesys.userservice.model.User;
 import com.minigenesys.userservice.repository.UserRepository;
-import com.minigenesys.userservice.util.JwtUtil;
+import com.minigenesys.common.util.JwtUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpEntity;
@@ -110,7 +111,7 @@ public class UserService {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid username or password");
         }
 
-        String token = jwtUtil.generateToken(user);
+        String token = jwtUtil.generateToken(user.getId().toString(), user.getTenantId(), user.getRole().name(), user.getLinkedAgentId());
 
         return AuthResponse.builder()
                 .accessToken(token)

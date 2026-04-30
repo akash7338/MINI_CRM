@@ -1,6 +1,7 @@
 package com.minigenesys.callservice.service;
 
 import com.minigenesys.callservice.dto.*;
+import com.minigenesys.common.dto.*;
 import com.minigenesys.callservice.kafka.CallEventProducer;
 import com.minigenesys.callservice.model.Call;
 import com.minigenesys.callservice.model.CallStatus;
@@ -14,7 +15,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Arrays;
 import java.util.List;
-import com.minigenesys.callservice.dto.CallLifecycleEvent;
+import com.minigenesys.common.dto.CallLifecycleEvent;
 
 @Slf4j
 @Service

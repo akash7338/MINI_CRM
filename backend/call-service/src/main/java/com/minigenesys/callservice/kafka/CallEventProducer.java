@@ -1,8 +1,8 @@
 package com.minigenesys.callservice.kafka;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.minigenesys.callservice.dto.CallEvent;
-import com.minigenesys.callservice.dto.CallLifecycleEvent;
+import com.minigenesys.common.dto.CallEvent;
+import com.minigenesys.common.dto.CallLifecycleEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.core.KafkaTemplate;

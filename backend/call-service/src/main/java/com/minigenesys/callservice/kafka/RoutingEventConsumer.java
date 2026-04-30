@@ -1,7 +1,7 @@
 package com.minigenesys.callservice.kafka;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.minigenesys.callservice.dto.RoutingEvent;
+import com.minigenesys.common.dto.RoutingEvent;
 import com.minigenesys.callservice.service.CallService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +26,7 @@ public class RoutingEventConsumer {
             callService.handleRoutingEvent(event);
         } catch (Exception e) {
             log.error("Failed to process routing event: ", e);
+            throw new RuntimeException("Failed to process Kafka message, throwing to trigger DLQ", e);
         }
     }
 }

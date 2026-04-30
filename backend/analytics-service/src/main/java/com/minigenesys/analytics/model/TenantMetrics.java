@@ -8,6 +8,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import jakarta.persistence.Version;
 import java.time.Instant;
 
 @Data
@@ -20,6 +21,9 @@ public class TenantMetrics {
     
     @Id
     private String tenantId;
+    
+    @Version
+    private Long version;
     
     @Builder.Default
     private Long totalCalls = 0L;

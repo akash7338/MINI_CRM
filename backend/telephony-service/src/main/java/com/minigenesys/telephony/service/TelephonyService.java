@@ -13,8 +13,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.minigenesys.telephony.client.CallServiceClient;
-import com.minigenesys.telephony.dto.RoutingEvent;
-import com.minigenesys.telephony.dto.TelephonyEvent;
+import com.minigenesys.common.dto.RoutingEvent;
+import com.minigenesys.common.dto.TelephonyEvent;
 import com.minigenesys.telephony.model.TelephonyCallSession;
 import com.minigenesys.telephony.repository.TelephonyRepository;
 
@@ -38,8 +38,8 @@ public class TelephonyService {
     @Value("${twilio.twimlAppSid}")
     private String twimlAppSid;
 
-    public String handleInboundCall(String callSid, String from, String to) {
-        log.info("Handling inbound call from {} to {} with SID {}", from, to, callSid);
+    public String handleInboundCall(String callSid, String from, String to, String tenantId) {
+        log.info("Handling inbound call from {} to {} with SID {} for tenant {}", from, to, callSid, tenantId);
         
         // 1. Idempotency Check: Don't create a new call if we already have one for this SID
         Optional<TelephonyCallSession> existing = repository.findByTwilioCallSid(callSid);
@@ -49,7 +49,6 @@ public class TelephonyService {
         }
 
         // 2. REST call outside @Transactional to avoid holding DB connections
-        String tenantId = "tenant1"; // TODO: Lookup tenant by 'To' number
         String internalCallId = callServiceClient.createInternalCall(tenantId, from);
         
         // 3. Save session in a localized transaction
@@ -149,6 +148,16 @@ public class TelephonyService {
         repository.findByTwilioCallSid(callSid).ifPresent(session -> {
             session.setStatus(callStatus);
             repository.save(session);
+
+            try {
+                if ("in-progress".equals(callStatus)) {
+                    callServiceClient.startCall(session.getTenantId(), session.getInternalCallId());
+                } else if ("completed".equals(callStatus)) {
+                    callServiceClient.completeCall(session.getTenantId(), session.getInternalCallId());
+                }
+            } catch (Exception e) {
+                log.error("Failed to update call status in CallService: ", e);
+            }
 
             TelephonyEvent event = TelephonyEvent.builder()
                     .eventType("TELEPHONY_STATUS_UPDATE")

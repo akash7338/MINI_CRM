@@ -1,6 +1,7 @@
 package com.minigenesys.agentstate.service;
 
 import com.minigenesys.agentstate.dto.*;
+import com.minigenesys.common.dto.*;
 import com.minigenesys.agentstate.kafka.AgentEventProducer;
 import com.minigenesys.agentstate.model.Agent;
 import com.minigenesys.agentstate.model.AgentStatus;
@@ -22,7 +23,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
-import com.minigenesys.agentstate.dto.CallLifecycleEvent;
+import com.minigenesys.common.dto.CallLifecycleEvent;
 
 @Slf4j
 @Service

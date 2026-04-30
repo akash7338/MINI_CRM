@@ -1,4 +1,4 @@
-package com.minigenesys.websocket.dto;
+package com.minigenesys.common.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

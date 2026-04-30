@@ -2,7 +2,7 @@ package com.minigenesys.websocket.kafka;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.minigenesys.websocket.dto.RealtimeEvent;
+import com.minigenesys.common.dto.RealtimeEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -52,14 +52,13 @@ public void consume(
                 .receivedAt(Instant.now())
                 .build();
 
-        messagingTemplate.convertAndSend("/topic/events", event);
-
         if (tenantId != null && !tenantId.isBlank()) {
             messagingTemplate.convertAndSend("/topic/events/" + tenantId, event);
         }
 
     } catch (Exception e) {
         log.error("Error processing Kafka event from topic {}: {}", topic, e.getMessage(), e);
+        throw new RuntimeException("Failed to process Kafka message, throwing to trigger DLQ", e);
     }
 }
 }

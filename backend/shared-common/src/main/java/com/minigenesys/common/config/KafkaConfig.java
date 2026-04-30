@@ -1,4 +1,4 @@
-package com.minigenesys.websocket.config;
+package com.minigenesys.common.config;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;

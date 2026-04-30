@@ -1,6 +1,6 @@
 package com.minigenesys.telephony.kafka;
 
-import com.minigenesys.telephony.dto.RoutingEvent;
+import com.minigenesys.common.dto.RoutingEvent;
 import com.minigenesys.telephony.service.TelephonyService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +23,7 @@ public class RoutingEventConsumer {
             telephonyService.handleAssignment(event);
         } catch (Exception e) {
             log.error("Failed to parse routing event: {}", message, e);
+            throw new RuntimeException("Failed to process Kafka message, throwing to trigger DLQ", e);
         }
     }
 }

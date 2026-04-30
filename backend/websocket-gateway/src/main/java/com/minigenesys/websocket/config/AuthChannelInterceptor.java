@@ -1,6 +1,6 @@
 package com.minigenesys.websocket.config;
 
-import com.minigenesys.websocket.util.JwtUtil;
+import com.minigenesys.common.util.JwtUtil;
 import io.jsonwebtoken.Claims;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

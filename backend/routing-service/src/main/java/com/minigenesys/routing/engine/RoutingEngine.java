@@ -51,8 +51,9 @@ public class RoutingEngine {
         String lockKey = LOCK_KEY_PREFIX + callId;
 
         // 1. Redis Lock
+        String lockToken = UUID.randomUUID().toString();
         boolean locked = Boolean.TRUE.equals(redisTemplate.opsForValue()
-                .setIfAbsent(lockKey, "LOCKED", 10, TimeUnit.SECONDS));
+                .setIfAbsent(lockKey, lockToken, 10, TimeUnit.SECONDS));
         
         if (!locked) {
             return AssignmentResult.failure(callId, tenantId, "LOCKED", "Routing in progress");
@@ -93,7 +94,8 @@ public class RoutingEngine {
             log.error("Error during routing for call {}: ", callId, e);
             return AssignmentResult.failure(callId, tenantId, "ERROR", e.getMessage());
         } finally {
-            redisTemplate.delete(lockKey);
+            String script = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
+            redisTemplate.execute(new DefaultRedisScript<>(script, Long.class), java.util.Collections.singletonList(lockKey), lockToken);
         }
     }
 

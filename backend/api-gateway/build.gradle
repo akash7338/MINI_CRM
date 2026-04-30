@@ -12,6 +12,7 @@ java {
 }
 
 repositories {
+    mavenLocal()
     mavenCentral()
 }
 
@@ -20,6 +21,7 @@ ext {
 }
 
 dependencies {
+    implementation 'com.minigenesys:shared-common:1.0.0'
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
     implementation 'org.springframework.cloud:spring-cloud-starter-gateway'
     implementation 'org.springframework.boot:spring-boot-starter-security'

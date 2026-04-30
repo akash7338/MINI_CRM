@@ -39,6 +39,7 @@ public class KafkaMessaging {
             }
         } catch (Exception e) {
             log.error("Failed to process call event: ", e);
+            throw new RuntimeException("Failed to process Kafka message, throwing to trigger DLQ", e);
         }
     }
 

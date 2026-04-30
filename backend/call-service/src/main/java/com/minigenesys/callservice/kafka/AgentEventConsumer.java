@@ -1,7 +1,7 @@
 package com.minigenesys.callservice.kafka;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.minigenesys.callservice.dto.AgentEvent;
+import com.minigenesys.common.dto.AgentEvent;
 import com.minigenesys.callservice.service.CallService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +28,7 @@ public class AgentEventConsumer {
             }
         } catch (Exception e) {
             log.error("Failed to process agent event for recovery: ", e);
+            throw new RuntimeException("Failed to process Kafka message, throwing to trigger DLQ", e);
         }
     }
 }

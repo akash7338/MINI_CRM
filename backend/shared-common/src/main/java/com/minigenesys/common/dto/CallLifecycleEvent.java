@@ -1,4 +1,4 @@
-package com.minigenesys.callservice.dto;
+package com.minigenesys.common.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -9,10 +9,9 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class RoutingEvent {
+public class CallLifecycleEvent {
+    private String eventType;
     private String callId;
-    private String agentId;
     private String tenantId;
-    private String status;
-    private String message;
+    private String agentId;
 }

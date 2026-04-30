@@ -37,4 +37,18 @@ public class CallServiceClient {
 
         return (String) response.get("id");
     }
+
+    public void startCall(String tenantId, String callId) {
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        headers.set("X-Tenant-Id", tenantId);
+        org.springframework.http.HttpEntity<Void> entity = new org.springframework.http.HttpEntity<>(headers);
+        restTemplate.postForObject(callServiceUrl + "/api/v1/calls/" + callId + "/start", entity, Void.class);
+    }
+
+    public void completeCall(String tenantId, String callId) {
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        headers.set("X-Tenant-Id", tenantId);
+        org.springframework.http.HttpEntity<Void> entity = new org.springframework.http.HttpEntity<>(headers);
+        restTemplate.postForObject(callServiceUrl + "/api/v1/calls/" + callId + "/complete", entity, Void.class);
+    }
 }

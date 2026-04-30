@@ -1,4 +1,4 @@
-package com.minigenesys.telephony.dto;
+package com.minigenesys.common.dto;
 
 import lombok.Builder;
 import lombok.Data;
