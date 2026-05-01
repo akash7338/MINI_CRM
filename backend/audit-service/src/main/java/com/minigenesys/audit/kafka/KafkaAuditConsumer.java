@@ -28,21 +28,26 @@ public class KafkaAuditConsumer {
     public void consume(String message, @Header(KafkaHeaders.RECEIVED_TOPIC) String topic) throws Exception {
         log.debug("Consuming event from topic {}: {}", topic, message);
 
-        JsonNode node = objectMapper.readTree(message);
+        JsonNode node = null;
+        try {
+            node = objectMapper.readTree(message);
+        } catch (Exception e) {
+            log.warn("Invalid JSON in audit topic {}: {}. Saving raw payload.", topic, e.getMessage());
+        }
 
-        String tenantId = node.has("tenantId") ? node.get("tenantId").asText() : null;
-        String eventType = node.has("eventType") ? node.get("eventType").asText() : topic;
+        String tenantId = node != null && node.has("tenantId") ? node.get("tenantId").asText() : null;
+        String eventType = node != null && node.has("eventType") ? node.get("eventType").asText() : topic;
         
         // Extract some common entity IDs if present
         String entityId = null;
         String entityType = null;
-        if (node.has("callId")) {
+        if (node != null && node.has("callId")) {
             entityId = node.get("callId").asText();
             entityType = "CALL";
-        } else if (node.has("agentId")) {
+        } else if (node != null && node.has("agentId")) {
             entityId = node.get("agentId").asText();
             entityType = "AGENT";
-        } else if (node.has("userId")) {
+        } else if (node != null && node.has("userId")) {
             entityId = node.get("userId").asText();
             entityType = "USER";
         }

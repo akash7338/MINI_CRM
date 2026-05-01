@@ -29,4 +29,4 @@ server:
 
 logging:
   level:
-    com.minigenesys.audit: DEBUG
+    com.minigenesys.audit: INFO
