@@ -77,13 +77,15 @@ public class TelephonyService {
         log.info("Updating telephony session for internal call {} with assigned agent {}", 
             event.getCallId(), event.getAgentId());
             
-        repository.findByInternalCallId(event.getCallId()).ifPresent(session -> {
-            // Only update if not already assigned
-            if (session.getAssignedAgentId() == null) {
-                session.setAssignedAgentId(event.getAgentId());
-                repository.save(session);
-            }
-        });
+        TelephonyCallSession session = repository.findByInternalCallId(event.getCallId())
+            .orElseThrow(() -> new RuntimeException("Telephony session not found for internal call " + event.getCallId() + ". Retrying..."));
+            
+        // Only update if not already assigned
+        if (session.getAssignedAgentId() == null) {
+            session.setAssignedAgentId(event.getAgentId());
+            repository.save(session);
+            log.info("Successfully saved assigned agent {} to telephony session", event.getAgentId());
+        }
     }
 
     private final Map<String, Map<String, String>> tokenCache = new java.util.concurrent.ConcurrentHashMap<>();

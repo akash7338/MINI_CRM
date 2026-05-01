@@ -36,6 +36,12 @@ export class WebsocketService {
     this.stompClient.onStompError = (frame) => {
       console.error('Broker reported error: ' + frame.headers['message']);
       console.error('Additional details: ' + frame.body);
+      
+      if (frame.headers && frame.headers['message'] && frame.headers['message'].includes('Unauthorized')) {
+        console.warn('Unauthorized WebSocket connection, clearing session and redirecting to login');
+        localStorage.clear();
+        window.location.href = '/login';
+      }
     };
   }
 
