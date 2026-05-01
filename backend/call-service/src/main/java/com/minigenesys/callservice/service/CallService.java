@@ -31,6 +31,7 @@ public class CallService {
 
         Call call = Call.builder()
                 .tenantId(tenantId)
+                .callerId(request.getCallerId())
                 .requiredSkills(request.getRequiredSkills())
                 .priority(priority)
                 .status(CallStatus.QUEUED) // Initial status per requirements
@@ -187,6 +188,7 @@ public class CallService {
         return CallResponse.builder()
                 .id(call.getId())
                 .tenantId(call.getTenantId())
+                .callerId(call.getCallerId())
                 .requiredSkills(call.getRequiredSkills())
                 .priority(call.getPriority())
                 .status(call.getStatus())

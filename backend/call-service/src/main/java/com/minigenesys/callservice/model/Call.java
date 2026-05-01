@@ -25,6 +25,8 @@ public class Call {
     @Column(nullable = false)
     private String tenantId;
 
+    private String callerId;
+
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "call_skills", joinColumns = @JoinColumn(name = "call_id"))
     @Column(name = "skill", nullable = false)
