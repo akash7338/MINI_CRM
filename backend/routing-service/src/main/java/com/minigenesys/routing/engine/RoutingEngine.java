@@ -63,7 +63,16 @@ public class RoutingEngine {
             // 2. Idempotency Check
             String cachedAgentId = redisTemplate.opsForValue().get(IDEMPOTENCY_KEY_PREFIX + callId);
             if (cachedAgentId != null) {
-                return AssignmentResult.success(callId, tenantId, cachedAgentId);
+                String agentStateKey = String.format(AGENT_STATE_KEY_TPL, tenantId, cachedAgentId);
+                Object statusObj = redisTemplate.opsForHash().get(agentStateKey, "status");
+                String currentStatus = statusObj != null ? statusObj.toString() : null;
+                
+                if ("BUSY".equals(currentStatus) || "AVAILABLE".equals(currentStatus)) {
+                    return AssignmentResult.success(callId, tenantId, cachedAgentId);
+                } else {
+                    log.warn("Idempotency hit for call {}, but agent {} is offline (status={}). Clearing idempotency cache.", callId, cachedAgentId, currentStatus);
+                    redisTemplate.delete(IDEMPOTENCY_KEY_PREFIX + callId);
+                }
             }
 
             // 3. Select Agent via Lua

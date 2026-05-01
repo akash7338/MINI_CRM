@@ -164,6 +164,11 @@ public class AgentStateService {
 
         Agent agent = agentOpt.get();
         AgentStatus oldStatus = agent.getStatus();
+
+        if (oldStatus == AgentStatus.OFFLINE) {
+            log.warn("Ignoring routing event for agent {} because they are OFFLINE. Breaking the ping-pong loop.", agent.getId());
+            return;
+        }
         
         // Update DB
         agent.setStatus(AgentStatus.BUSY);
@@ -213,7 +218,6 @@ public class AgentStateService {
         if (oldStatus == AgentStatus.AVAILABLE && newStatus == AgentStatus.BUSY) return true;
         if (oldStatus == AgentStatus.BUSY && newStatus == AgentStatus.AVAILABLE) return true;
         if (oldStatus == AgentStatus.AVAILABLE && newStatus == AgentStatus.OFFLINE) return true;
-        if (oldStatus == AgentStatus.BUSY && newStatus == AgentStatus.OFFLINE) return true;
         return false;
     }
 
