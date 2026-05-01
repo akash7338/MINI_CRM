@@ -102,6 +102,12 @@ export class ApiService {
     return this.http.post(`${this.GATEWAY_URL}/api/v1/calls/${callId}/${endpoint}`, {}, this.getHeaders());
   }
 
+  getCall(callId: string, tenantId: string): Observable<any> {
+    const options: any = this.getHeaders();
+    options.headers['X-Tenant-Id'] = tenantId;
+    return this.http.get(`${this.GATEWAY_URL}/api/v1/calls/${callId}`, options);
+  }
+
   // Analytics API
   getMetrics(tenantId: string): Observable<any> {
     return this.http.get(`${this.GATEWAY_URL}/api/v1/analytics/${tenantId}/metrics`, this.getHeaders());

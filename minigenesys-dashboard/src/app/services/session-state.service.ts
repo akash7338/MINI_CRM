@@ -72,11 +72,11 @@ export class SessionStateService implements OnDestroy {
         if (res.activeCallId && res.tenantId) {
           // Fetch the real status from call-service instead of guessing
           this.api.getCall(res.activeCallId, res.tenantId).subscribe({
-            next: (callRes) => {
+            next: (callRes: any) => {
               console.log('[SessionState] Restored Call Data:', callRes);
               this.setCall(callRes.callId, callRes.status);
             },
-            error: (err) => {
+            error: (err: any) => {
               console.warn('[SessionState] Could not fetch active call details, falling back to basic state');
               const fallbackStatus = uiStatus === 'On Call' ? 'ROUTED' : 'QUEUED';
               this.setCall(res.activeCallId, fallbackStatus);
