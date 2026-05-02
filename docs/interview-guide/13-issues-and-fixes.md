@@ -136,3 +136,19 @@
   1. Updated `RoutingEngine.java` to use an "Upsert" pattern: `assignmentRepository.findByCallId(callId).orElseGet(...)`. Now, when a call is reassigned, it smoothly updates the existing database record.
   2. Updated `CallService.java` to explicitly handle the `ABANDONED` routing status. If a call is abandoned and has an assigned agent, it now publishes a `CALL_COMPLETED` event to force the `agent-state-service` to free the stuck agent.
 - **Key Learning:** In distributed state machines, database constraints (like `UNIQUE`) can completely break recovery/requeue flows. Additionally, every terminal state in a workflow (including failure states like `ABANDONED`) must have explicitly mapped cleanup logic to prevent resource leaks (stuck agents).
+
+---
+
+## 13. UI State Desynchronization and Event Loss (Angular Zone & Subscription Race)
+
+- **Problem:** When an inbound call was routed and assigned, the agent could hear the phone ring (via Twilio), but the dashboard UI failed to show the "Call Panel" and the agent status remained "Ready" instead of "On Call". Sometimes, details would mysteriously appear several minutes later, often after a recovery event.
+- **Root Cause:**
+    1. **Angular Zone Issue:** WebSocket events (STOMP) and Telephony events (Twilio SDK) were firing from background threads outside of Angular's `NgZone`. Because of this, even when the frontend received the data, Angular's change detection wasn't triggered, and the UI didn't update to reflect the new state until a manual interaction (like a mouse click) forced a refresh.
+    2. **Subscription Race Condition:** The `WebsocketService` initialized at app boot. If it connected before the user logged in, it didn't have the `tenantId` yet and thus never subscribed to the relevant event topic. Even after login, it remained connected but "deaf" to events because the subscription logic only fired once on the initial connection.
+    3. **STOMP Connection Race (White Screen Crash):** After implementing the dynamic subscription fix, a new race condition emerged. `SessionStateService` tried to subscribe to tenant events immediately upon initialization. However, because the STOMP connection is asynchronous, calling `stompClient.subscribe()` before the connection was fully established resulted in a `TypeError: There is no underlying STOMP connection`. This crash occurred during the Angular bootstrap phase, resulting in a permanent white screen.
+- **Impact:** Agents were left "flying blind"—they could answer calls but had no UI control or visibility into call details. The system state appeared "laggy" or inconsistent.
+- **Fix:**
+    1. **NgZone Wrapping:** Updated `WebsocketService` and `TelephonyService` to wrap all event emissions and state updates in `this.zone.run(() => { ... })`. This forces Angular to refresh the UI the moment a message arrives.
+    2. **Dynamic Subscription:** Added a `subscribeToTenantEvents()` method to `WebsocketService` that is explicitly called during `SessionStateService` initialization (after login/rehydration). This ensures the correct tenant topic is always subscribed to, even if the connection was established prior to login.
+    3. **STOMP State Gating:** Updated `WebsocketService.subscribeToTenantEvents()` to gate the subscription call with a `stompClient.connected` check. If the connection is not yet ready, the method exits gracefully. To ensure the subscription eventually happens, a call to `subscribeToTenantEvents()` was added to the WebSocket `onConnect` callback, allowing the system to "self-heal" and subscribe as soon as the line is open.
+- **Key Learning:** In real-time Angular applications, background SDKs (WebSockets, Twilio, etc.) must be bridged back into the Angular Zone. Additionally, state-dependent subscriptions (like per-tenant event topics) must be re-evaluated whenever the session state changes, not just on initial connection.

@@ -58,6 +58,8 @@ export class SessionStateService implements OnDestroy {
     if (storedAgentId) {
       this.patchAgent({ agentId: storedAgentId });
       this.loadInitialState(storedAgentId);
+      // Ensure we are subscribed to the correct tenant events
+      this.ws.subscribeToTenantEvents();
     }
   }
 

@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, NgZone } from '@angular/core';
 import { Client } from '@stomp/stompjs';
 import * as _SockJS from 'sockjs-client';
 import { Observable, Subject } from 'rxjs';
@@ -13,24 +13,28 @@ export class WebsocketService {
   private stompClient: Client;
   private eventsSubject = new Subject<any>();
   public events$ = this.eventsSubject.asObservable();
+  
+  private connected = false;
+  private currentSubscription: any = null;
 
-  constructor() {
+  constructor(private zone: NgZone) {
     this.stompClient = new Client({
       webSocketFactory: () => new SockJS('http://localhost:8080/ws'),
-      debug: (msg: string) => console.log(msg),
+      debug: (msg: string) => console.log('[STOMP DEBUG]', msg),
       reconnectDelay: 5000,
     });
 
     this.stompClient.onConnect = (frame) => {
-      console.log('Connected: ' + frame);
-      const tenantId = localStorage.getItem('tenantId');
-      if (tenantId) {
-        this.stompClient.subscribe(`/topic/events/${tenantId}`, (message) => {
-          if (message.body) {
-            this.eventsSubject.next(JSON.parse(message.body));
-          }
-        });
-      }
+      console.log('[Websocket] Connected: ' + frame);
+      this.connected = true;
+      // When we connect, check if we have a tenantId to subscribe to
+      this.subscribeToTenantEvents();
+    };
+
+    this.stompClient.onDisconnect = () => {
+      console.log('[Websocket] Disconnected');
+      this.connected = false;
+      this.currentSubscription = null;
     };
 
     this.stompClient.onStompError = (frame) => {
@@ -39,31 +43,61 @@ export class WebsocketService {
       
       if (frame.headers && frame.headers['message'] && frame.headers['message'].includes('Unauthorized')) {
         console.warn('Unauthorized WebSocket connection, clearing session and redirecting to login');
-        localStorage.clear();
-        window.location.href = '/login';
+        this.zone.run(() => {
+          localStorage.clear();
+          window.location.href = '/login';
+        });
       }
     };
   }
 
-  private connected = false;
+  public subscribeToTenantEvents() {
+    const tenantId = localStorage.getItem('tenantId');
+    if (!tenantId) {
+      console.warn('[Websocket] Cannot subscribe: No tenantId found in storage');
+      return;
+    }
+
+    // Check if the client is actually connected to the broker
+    if (!this.stompClient.connected) {
+      console.warn('[Websocket] Not connected yet. Subscription will happen automatically on connection.');
+      return;
+    }
+
+    // Unsubscribe from previous tenant if any
+    if (this.currentSubscription) {
+      console.log('[Websocket] Unsubscribing from previous tenant');
+      this.currentSubscription.unsubscribe();
+    }
+
+    console.log(`[Websocket] Subscribing to /topic/events/${tenantId}`);
+    this.currentSubscription = this.stompClient.subscribe(`/topic/events/${tenantId}`, (message) => {
+      if (message.body) {
+        this.zone.run(() => {
+          const payload = JSON.parse(message.body);
+          console.log('[Websocket] Event received:', payload);
+          this.eventsSubject.next(payload);
+        });
+      }
+    });
+  }
 
   connect() {
     const token = localStorage.getItem('token');
     if (!token) return;
 
-    if (this.connected) return; // Prevent duplicate connections
+    // Use stompClient.active to check if we have already called activate()
+    if (this.stompClient.active) return;
     
-    // Set headers before activation
     this.stompClient.connectHeaders = {
       'Authorization': `Bearer ${token}`
     };
 
-    this.connected = true;
     this.stompClient.activate();
   }
 
   disconnect() {
-    this.connected = false;
     this.stompClient.deactivate();
+    this.connected = false;
   }
 }

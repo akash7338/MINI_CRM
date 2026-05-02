@@ -1,7 +1,7 @@
-import { Injectable } from '@angular/core';
+import { Injectable, NgZone } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Device, Call } from '@twilio/voice-sdk';
-import { BehaviorSubject, Observable, tap } from 'rxjs';
+import { BehaviorSubject, Observable } from 'rxjs';
 import { ApiService } from './api.service';
 import { SessionStateService } from './session-state.service';
 
@@ -27,7 +27,8 @@ export class TelephonyService {
   constructor(
     private http: HttpClient,
     private apiService: ApiService,
-    private session: SessionStateService
+    private session: SessionStateService,
+    private zone: NgZone
   ) {}
 
   async initialize(agentId: string): Promise<void> {
@@ -44,44 +45,49 @@ export class TelephonyService {
       if (!res) return;
 
       this.device = new Device(res.token, {
-      logLevel: 'debug',
-      edge: 'ashburn'
-    });
+        logLevel: 'debug',
+        edge: 'ashburn'
+      });
 
-    this.device.on('registered', () => console.log('Twilio Device Registered'));
-    this.device.on('error', (error) => console.error('Twilio Device Error:', error));
-    
-    this.device.on('incoming', (call: Call) => {
-      console.log('Incoming call from:', call.parameters['From']);
-      this.incomingCallSubject.next(call);
+      this.device.on('registered', () => console.log('Twilio Device Registered'));
+      this.device.on('error', (error) => console.error('Twilio Device Error:', error));
       
-      call.on('disconnect', () => {
-        this.incomingCallSubject.next(null);
-        this.activeCallSubject.next(null);
+      this.device.on('incoming', (call: Call) => {
+        this.zone.run(() => {
+          console.log('Incoming call from:', call.parameters['From']);
+          this.incomingCallSubject.next(call);
+        });
         
-        // Ensure the backend knows the call ended if the caller hung up
-        const currentCallId = this.session.call.callId;
-        if (currentCallId) {
-          this.apiService.updateCallStatus(currentCallId, 'COMPLETED').subscribe({
-            next: (res) => this.session.setCall(currentCallId, res.status),
-            error: (err) => console.error('Failed to notify backend of call completion', err)
+        call.on('disconnect', () => {
+          this.zone.run(() => {
+            this.incomingCallSubject.next(null);
+            this.activeCallSubject.next(null);
           });
-        }
-      });
+          
+          // Ensure the backend knows the call ended
+          const currentCallId = this.session.call.callId;
+          if (currentCallId) {
+            this.apiService.updateCallStatus(currentCallId, 'COMPLETED').subscribe({
+              next: (res) => this.session.setCall(currentCallId, res.status),
+              error: (err) => console.error('Failed to notify backend of call completion', err)
+            });
+          }
+        });
 
-      call.on('cancel', () => {
-        this.incomingCallSubject.next(null);
-        
-        // If caller hangs up before we answer, we need to clear the backend state
-        const currentCallId = this.session.call.callId;
-        if (currentCallId) {
-          this.apiService.updateCallStatus(currentCallId, 'COMPLETED').subscribe({
-            next: (res) => this.session.setCall(currentCallId, res.status),
-            error: (err) => console.error('Failed to clear abandoned call', err)
+        call.on('cancel', () => {
+          this.zone.run(() => {
+            this.incomingCallSubject.next(null);
           });
-        }
+          
+          const currentCallId = this.session.call.callId;
+          if (currentCallId) {
+            this.apiService.updateCallStatus(currentCallId, 'COMPLETED').subscribe({
+              next: (res) => this.session.setCall(currentCallId, res.status),
+              error: (err) => console.error('Failed to clear abandoned call', err)
+            });
+          }
+        });
       });
-    });
 
       await this.device.register();
     } catch (error) {
@@ -101,14 +107,11 @@ export class TelephonyService {
     call.reject();
     this.incomingCallSubject.next(null);
     
-    // Notify the backend that the agent rejected the call
-    // This allows the backend to requeue the call and free this agent
     const currentCallId = this.session.call.callId;
     if (currentCallId) {
       this.apiService.updateCallStatus(currentCallId, 'REJECTED').subscribe({
         next: () => {
           console.log('Successfully rejected call on backend');
-          // Reset local UI call state
           this.session.setCall(null, null);
         },
         error: (err) => console.error('Failed to notify backend of call rejection', err)
