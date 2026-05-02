@@ -90,10 +90,15 @@ public class CallService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
         }
 
+        /*
         if (call.getStatus() != CallStatus.IN_PROGRESS && 
             call.getStatus() != CallStatus.ROUTED && 
             call.getStatus() != CallStatus.QUEUED) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Call must be in IN_PROGRESS, ROUTED, or QUEUED status to complete");
+        }
+        */
+        if (call.getStatus() != CallStatus.IN_PROGRESS) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Call must be in IN_PROGRESS status to complete");
         }
 
         call.setStatus(CallStatus.COMPLETED);

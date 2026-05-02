@@ -154,8 +154,13 @@ public class TelephonyService {
             try {
                 if ("in-progress".equals(callStatus)) {
                     callServiceClient.startCall(session.getTenantId(), session.getInternalCallId());
+                /*
                 } else if ("completed".equals(callStatus) || "canceled".equals(callStatus) || 
                            "no-answer".equals(callStatus) || "failed".equals(callStatus)) {
+                    callServiceClient.completeCall(session.getTenantId(), session.getInternalCallId());
+                }
+                */
+                } else if ("completed".equals(callStatus)) {
                     callServiceClient.completeCall(session.getTenantId(), session.getInternalCallId());
                 }
             } catch (Exception e) {
