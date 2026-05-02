@@ -39,7 +39,7 @@ public class AnalyticsEventConsumer {
     }
 
     private void handleCallEvent(String tenantId, JsonNode node) {
-        boolean isNew = !node.has("isNew") || node.get("isNew").asBoolean();
+        boolean isNew = !node.has("newCall") || node.get("newCall").asBoolean();
         if (isNew) {
             analyticsService.incrementTotalCalls(tenantId);
         }

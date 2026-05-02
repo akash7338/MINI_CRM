@@ -70,3 +70,23 @@
   - Added `@SuppressWarnings("unchecked")` above the `restTemplate.postForObject()` call.
   - Added proper `import` statements for `HttpHeaders`, `HttpEntity`, `MediaType` and replaced all inline FQN references.
 - **Key Learning:** `RestTemplate` with `Map.class` always produces unchecked warnings — `@SuppressWarnings` is the standard, accepted fix in Spring applications.
+
+---
+
+## 7. Analytics Data Inflation (1748 Total Calls)
+
+- **Problem:** The `MetricsPanelComponent` on the frontend dashboard mysteriously showed exactly 1748 total calls and 36 completed calls. 
+- **Root Cause:** A combination of a serialization bug and a previous "Ghost Call" loop. `CallEvent` used `@Builder.Default private boolean isNew = true;`. Lombok generated the getter `isNew()`, which Jackson serialized as `"new": true`. However, `AnalyticsEventConsumer` was checking `!node.has("isNew")`. Since the field in the JSON was named `"new"`, it evaluated to `true` for every single message on the `call-events` topic. During prior Ghost Call debugging, an agent disconnect loop continuously requeued calls, flooding Kafka with `call-events` messages that Analytics incorrectly counted as brand new calls.
+- **Impact:** `totalCalls` was artificially inflated by thousands of events.
+- **Fix:** Renamed the field in `CallEvent.java` from `isNew` to `newCall` so Jackson serializes it predictably as `"newCall"`. Updated `AnalyticsEventConsumer` to check for `"newCall"`.
+- **Key Learning:** Be careful when naming boolean fields with "is" prefixes when combining Lombok and Jackson, as it alters the JSON property name.
+
+---
+
+## 8. HikariCP Thread Starvation or Clock Leap Detected
+
+- **Problem:** The `user-service` and other microservices periodically logged `WARN: HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=15m30s103ms)`.
+- **Root Cause:** In local development on a laptop, when the laptop lid is closed (or the machine sleeps), the OS suspends all Java processes in RAM. HikariCP's housekeeper thread expects to run exactly every 30 seconds to clean up idle database connections. When the laptop wakes up, the thread resumes, checks the system clock, sees a massive unexpected time jump (e.g., 15 minutes disappeared), and logs a warning assuming the server was totally starved of CPU time or manually tampered with.
+- **Impact:** None. It is a completely harmless false alarm in a local laptop environment.
+- **Fix:** No fix required. Normal behavior for suspended processes.
+- **Key Learning:** Enterprise server software assumes it runs on an always-awake infrastructure. It interprets routine local sleep events as critical performance or scheduling failures.

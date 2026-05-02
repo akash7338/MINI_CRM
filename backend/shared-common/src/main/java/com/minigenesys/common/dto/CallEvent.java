@@ -17,5 +17,5 @@ public class CallEvent {
     private Set<String> requiredSkills;
     private Integer priority;
     @Builder.Default
-    private boolean isNew = true;
+    private boolean newCall = true;
 }

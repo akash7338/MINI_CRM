@@ -37,7 +37,7 @@ public class AnalyticsDLQTest {
         doThrow(new RuntimeException("Simulated processing failure"))
             .when(analyticsService).incrementTotalCalls(anyString());
 
-        String event = "{\"tenantId\":\"tenant1\", \"isNew\":true}";
+        String event = "{\"tenantId\":\"tenant1\", \"newCall\":true}";
         kafkaTemplate.send("call-events", "tenant1", event).get();
 
         // Wait for retries (1s + 2s + 4s + some buffer)
