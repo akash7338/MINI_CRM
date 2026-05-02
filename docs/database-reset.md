@@ -35,7 +35,7 @@ PGPASSWORD=postgres psql -U postgres -d minigenesys_analytics -c "TRUNCATE TABLE
 ### 6. Clean Agent State Database
 This removes any ghost agents that were dynamically created during tests, keeping only the primary `AG_001` agent.
 ```bash
-PGPASSWORD=postgres psql -U postgres -d minigenesys_agent_state -c "DELETE FROM agent_skills WHERE agent_id NOT IN ('AG_001'); DELETE FROM agents WHERE id NOT IN ('AG_001');"
+PGPASSWORD=postgres psql -U postgres -d minigenesys_agent_state -c "DELETE FROM agent_skills WHERE agent_id NOT IN ('AG_001'); DELETE FROM agents WHERE id NOT IN ('AG_001'); UPDATE agents SET status = 'AVAILABLE', active_call_id = NULL WHERE id = 'AG_001';"
 ```
 
 ### 7. Clean Users Database
@@ -55,6 +55,6 @@ PGPASSWORD=postgres psql -U postgres -d minigenesys_call_service -c "TRUNCATE TA
 PGPASSWORD=postgres psql -U postgres -d minigenesys_telephony -c "TRUNCATE TABLE telephony_call_sessions CASCADE;" && \
 PGPASSWORD=postgres psql -U postgres -d minigenesys_routing -c "TRUNCATE TABLE assignments CASCADE;" && \
 PGPASSWORD=postgres psql -U postgres -d minigenesys_analytics -c "TRUNCATE TABLE tenant_metrics CASCADE;" && \
-PGPASSWORD=postgres psql -U postgres -d minigenesys_agent_state -c "DELETE FROM agent_skills WHERE agent_id NOT IN ('AG_001'); DELETE FROM agents WHERE id NOT IN ('AG_001');" && \
+PGPASSWORD=postgres psql -U postgres -d minigenesys_agent_state -c "DELETE FROM agent_skills WHERE agent_id NOT IN ('AG_001'); DELETE FROM agents WHERE id NOT IN ('AG_001'); UPDATE agents SET status = 'AVAILABLE', active_call_id = NULL WHERE id = 'AG_001';" && \
 PGPASSWORD=postgres psql -U postgres -d minigenesys_users -c "DELETE FROM users WHERE username NOT IN ('admin', 'kumar_akash14');"
 ```

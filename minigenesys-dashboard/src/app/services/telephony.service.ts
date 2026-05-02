@@ -98,32 +98,71 @@ export class TelephonyService {
   }
 
   acceptCall(call: Call) {
-    call.accept();
-    this.incomingCallSubject.next(null);
-    this.activeCallSubject.next(call);
+    this.zone.run(() => {
+      call.accept();
+      this.incomingCallSubject.next(null);
+      this.activeCallSubject.next(call);
+
+      // Notify backend that the call has physically started
+      const currentCallId = this.session.call.callId;
+      if (currentCallId) {
+        this.apiService.updateCallStatus(currentCallId, 'IN_PROGRESS').subscribe({
+          next: (res) => this.session.setCall(currentCallId, res.status),
+          error: (err) => console.error('Failed to start call on backend', err)
+        });
+      }
+    });
   }
 
   rejectCall(call: Call) {
-    call.reject();
-    this.incomingCallSubject.next(null);
-    
-    const currentCallId = this.session.call.callId;
-    if (currentCallId) {
-      this.apiService.updateCallStatus(currentCallId, 'REJECTED').subscribe({
+    this.zone.run(() => {
+      call.reject();
+      this.incomingCallSubject.next(null);
+      
+      const currentCallId = this.session.call.callId;
+      const agentId = this.session.agent.agentId;
+
+      if (!agentId) return;
+
+      // 1. Immediately update UI to show Offline
+      this.session.setAgentStatus('Offline');
+
+      // 2. We MUST wait for the backend to confirm Offline status BEFORE rejecting the call.
+      // This ensures the routing engine sees us as Offline before the call is requeued.
+      this.apiService.updateAgentStatus(agentId, 'logout').subscribe({
         next: () => {
-          console.log('Successfully rejected call on backend');
-          this.session.setCall(null, null);
+          console.log('Agent marked OFFLINE successfully. Proceeding with call rejection.');
+          
+          if (currentCallId) {
+            this.apiService.updateCallStatus(currentCallId, 'REJECTED').subscribe({
+              next: () => {
+                console.log('Successfully rejected call on backend');
+                this.session.setCall(null, null);
+              },
+              error: (err) => console.error('Failed to notify backend of call rejection', err)
+            });
+          }
         },
-        error: (err) => console.error('Failed to notify backend of call rejection', err)
+        error: (err) => {
+          console.error('Failed to force logout on rejection. Rejecting call anyway.', err);
+          // Fallback: Reject anyway even if logout failed
+          if (currentCallId) {
+            this.apiService.updateCallStatus(currentCallId, 'REJECTED').subscribe(() => {
+              this.session.setCall(null, null);
+            });
+          }
+        }
       });
-    }
+    });
   }
 
   hangup() {
-    const call = this.activeCallSubject.value;
-    if (call) {
-      call.disconnect();
-      this.activeCallSubject.next(null);
-    }
+    this.zone.run(() => {
+      const call = this.activeCallSubject.value;
+      if (call) {
+        call.disconnect();
+        this.activeCallSubject.next(null);
+      }
+    });
   }
 }

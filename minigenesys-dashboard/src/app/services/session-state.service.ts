@@ -194,6 +194,11 @@ export class SessionStateService implements OnDestroy {
           }
         }
         
+        if (newStatus === 'On Call' && !this.call.callId) {
+          console.warn('[SessionState] Ignoring On Call event — no active call in session');
+          return;
+        }
+
         this.setAgentStatus(newStatus);
       }
     } else if (topic === 'routing-events') {

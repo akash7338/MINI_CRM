@@ -139,16 +139,29 @@
 
 ---
 
-## 13. UI State Desynchronization and Event Loss (Angular Zone & Subscription Race)
+## 13. Agent Synchronization, Real-Time Lifecycle Failures, and Bootstrap Stability
 
-- **Problem:** When an inbound call was routed and assigned, the agent could hear the phone ring (via Twilio), but the dashboard UI failed to show the "Call Panel" and the agent status remained "Ready" instead of "On Call". Sometimes, details would mysteriously appear several minutes later, often after a recovery event.
+- **Problem:** The agent dashboard suffered from multiple critical failures:
+    1. **UI Lag:** Inbound calls would ring via Twilio, but the "Call Panel" and "Timer" wouldn't appear until a manual mouse click.
+    2. **White Screen:** The application failed to boot entirely, leaving users on a blank screen due to a WebSocket race condition.
+    3. **Lifecycle Conflict:** Ending a call often failed with a `409 Conflict`, causing calls to "stick" on the panel or re-assign themselves in an infinite loop.
+    4. **Agent Status Race Condition:** Late-arriving Kafka events could flip an agent's status back to "On Call" after a call was completed or rejected.
+    5. **Infinite Rejection Loop:** In a single-agent environment, rejecting a call would cause it to be immediately re-assigned to the same agent.
 - **Root Cause:**
-    1. **Angular Zone Issue:** WebSocket events (STOMP) and Telephony events (Twilio SDK) were firing from background threads outside of Angular's `NgZone`. Because of this, even when the frontend received the data, Angular's change detection wasn't triggered, and the UI didn't update to reflect the new state until a manual interaction (like a mouse click) forced a refresh.
-    2. **Subscription Race Condition:** The `WebsocketService` initialized at app boot. If it connected before the user logged in, it didn't have the `tenantId` yet and thus never subscribed to the relevant event topic. Even after login, it remained connected but "deaf" to events because the subscription logic only fired once on the initial connection.
-    3. **STOMP Connection Race (White Screen Crash):** After implementing the dynamic subscription fix, a new race condition emerged. `SessionStateService` tried to subscribe to tenant events immediately upon initialization. However, because the STOMP connection is asynchronous, calling `stompClient.subscribe()` before the connection was fully established resulted in a `TypeError: There is no underlying STOMP connection`. This crash occurred during the Angular bootstrap phase, resulting in a permanent white screen.
-- **Impact:** Agents were left "flying blind"—they could answer calls but had no UI control or visibility into call details. The system state appeared "laggy" or inconsistent.
+    1. **Angular Zone Isolation:** Event listeners for STOMP (WebSockets) and Twilio SDK were executing on background threads. Angular's change detection was unaware of these events, failing to update the view.
+    2. **Connection Race Conditions:** 
+        - **Handshake Race:** Subscribing to topics before the STOMP connection was `CONNECTED` caused a fatal `TypeError`.
+        - **Session Race:** The app tried to subscribe to tenant-specific topics before the user's `tenantId` was loaded from storage.
+    3. **Header Type Mismatch:** `ApiService` was using plain objects for headers, causing `.set()` calls (exclusive to `HttpHeaders`) to crash the request pipeline before reaching the backend.
+    4. **Telephony State Desync (409 Conflict & Missing Banner):** When an agent answered a call via the Twilio popup, the audio connected, but the system (a) didn't update the UI banner because the action was outside `NgZone`, and (b) didn't notify the backend that the call had transition to `IN_PROGRESS`. This caused a 409 Conflict when hanging up, as the backend refused to "Complete" a call that it still thought was just "Ringing."
+    5. **Agent Status Race Condition:** Kafka events for "Agent Busy" (from assignment) and "Agent Available" (from completion) can arrive out-of-order at the WebSocket. If a "Busy" event arrives late (after a call is rejected/completed), it flips the agent back to "On Call" despite having no active call, leaving the agent panel in an inconsistent state.
 - **Fix:**
-    1. **NgZone Wrapping:** Updated `WebsocketService` and `TelephonyService` to wrap all event emissions and state updates in `this.zone.run(() => { ... })`. This forces Angular to refresh the UI the moment a message arrives.
-    2. **Dynamic Subscription:** Added a `subscribeToTenantEvents()` method to `WebsocketService` that is explicitly called during `SessionStateService` initialization (after login/rehydration). This ensures the correct tenant topic is always subscribed to, even if the connection was established prior to login.
-    3. **STOMP State Gating:** Updated `WebsocketService.subscribeToTenantEvents()` to gate the subscription call with a `stompClient.connected` check. If the connection is not yet ready, the method exits gracefully. To ensure the subscription eventually happens, a call to `subscribeToTenantEvents()` was added to the WebSocket `onConnect` callback, allowing the system to "self-heal" and subscribe as soon as the line is open.
-- **Key Learning:** In real-time Angular applications, background SDKs (WebSockets, Twilio, etc.) must be bridged back into the Angular Zone. Additionally, state-dependent subscriptions (like per-tenant event topics) must be re-evaluated whenever the session state changes, not just on initial connection.
+    1. **Comprehensive NgZone Integration:** Wrapped both automatic listeners (incoming, disconnect) and manual actions (accept, reject, hangup) in `this.zone.run()`.
+    2. **Manual Action Zone Wrapping & Backend Sync:** Wrapped manual UI actions (`acceptCall`, `rejectCall`, `hangup`) in `this.zone.run()` to ensure immediate UI reactivity (timer banner appearance). Additionally, updated `acceptCall` to explicitly notify the backend to transition the call status to `IN_PROGRESS`, ensuring the lifecycle is valid for a future `COMPLETED` update.
+    3. **Status Update Gating:** Added logic to `SessionStateService` to ignore "On Call" status updates if the frontend doesn't have an active `callId` in its current session. This ensures that late-arriving "Busy" messages cannot overwrite a valid "Ready" state after a call has been finalized.
+    4. **State-Gated Subscriptions:** Implemented a "ready-check" in `WebsocketService` that verifies both the STOMP connection state and the availability of the `tenantId` before subscribing.
+    5. **Bootstrap Self-Healing:** Added an `onConnect` hook to the WebSocket client to automatically trigger subscriptions the moment the handshake completes.
+    6. **HttpHeaders Migration:** Converted the entire API request pipeline to use proper Angular `HttpHeaders`, ensuring stable header manipulation.
+    7. **Forced Logout on Reject:** Implemented a circuit-breaker in the rejection flow. When an agent rejects a call, the dashboard immediately triggers a forced logout to the `agent-state-service`. This moves the agent to an `OFFLINE` state, effectively removing them from the routing pool and preventing immediate re-assignment of the same call.
+    8. **Explicit Lifecycle Signaling:** Updated the telephony "Accept" logic to trigger a backend status update to `IN_PROGRESS`, enabling a valid path to `COMPLETED` on hangup.
+- **Key Learning:** Real-time distributed systems require perfect alignment between the "Audio State" (Twilio), "Message State" (WebSocket), and "Database State" (REST API). Any break in this chain—even a simple Angular Change Detection delay—leads to "Ghost Calls" and system instability.

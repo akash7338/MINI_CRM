@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable, tap, BehaviorSubject } from 'rxjs';
 
 @Injectable({
@@ -19,9 +19,9 @@ export class ApiService {
   private getHeaders() {
     const token = localStorage.getItem('token');
     return {
-      headers: {
+      headers: new HttpHeaders({
         'Authorization': `Bearer ${token}`
-      }
+      })
     };
   }
 
@@ -58,6 +58,13 @@ export class ApiService {
 
   logout() {
     localStorage.clear();
+  }
+
+  updateAgentStatus(agentId: string, status: 'available' | 'busy' | 'logout'): Observable<any> {
+    const endpoint = `${this.GATEWAY_URL}/api/v1/agents/${agentId}/${status}`;
+    return this.http.post(endpoint, {}, {
+      headers: this.getHeaders()
+    });
   }
 
   // Helper to handle 401s globally if needed, or just let components handle it.
@@ -111,7 +118,7 @@ export class ApiService {
 
   getCall(callId: string, tenantId: string): Observable<any> {
     const options: any = this.getHeaders();
-    options.headers['X-Tenant-Id'] = tenantId;
+    options.headers = options.headers.set('X-Tenant-Id', tenantId);
     return this.http.get(`${this.GATEWAY_URL}/api/v1/calls/${callId}`, options);
   }
 
@@ -123,7 +130,7 @@ export class ApiService {
   // Admin APIs
   createAgent(tenantId: string, agentData: any): Observable<any> {
     const options: any = this.getHeaders();
-    options.headers['X-Tenant-Id'] = tenantId;
+    options.headers = options.headers.set('X-Tenant-Id', tenantId);
     return this.http.post(`${this.GATEWAY_URL}/api/v1/users/agents`, agentData, options);
   }
 }
