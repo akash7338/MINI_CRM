@@ -66,7 +66,7 @@ export class SessionStateService implements OnDestroy {
   private loadInitialState(agentId: string) {
     console.log('[SessionState] Loading initial state for:', agentId);
     this.api.getAgentState(agentId).subscribe({
-      next: (res) => {
+      next: (res: any) => {
         console.log('[SessionState] Initial State Loaded:', res);
         const uiStatus = this.mapAgentStatus(res.status);
         this.setAgentStatus(uiStatus);
@@ -91,7 +91,7 @@ export class SessionStateService implements OnDestroy {
           });
         }
       },
-      error: (err) => console.error('[SessionState] Failed to load initial state', err)
+      error: (err: any) => console.error('[SessionState] Failed to load initial state', err)
     });
   }
 

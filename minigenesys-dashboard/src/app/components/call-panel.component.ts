@@ -137,20 +137,23 @@ export class CallPanelComponent implements OnInit, OnDestroy {
       return;
     }
     this.api.createCall(tenantId, 'sales').subscribe({
-      next: (res) => {
+      next: (res: any) => {
         this.session.setCall(res.callId, res.status);
+        this.error = null;
       },
-      error: (err) => this.error = 'Failed to create call'
+      error: (err: any) => {
+        this.error = `Failed to create test call: ${err.error?.message || err.message}`;
+      }
     });
   }
 
   startCall() {
     if (!this.callId) return;
     this.api.updateCallStatus(this.callId, 'IN_PROGRESS').subscribe({
-      next: (res) => {
+      next: (res: any) => {
         this.session.setCall(this.callId, res.status);
       },
-      error: (err) => this.error = 'Failed to start call'
+      error: (err: any) => this.error = 'Failed to start call'
     });
   }
 

@@ -267,7 +267,7 @@ export class AppComponent {
     const role = localStorage.getItem('role');
     
     if (role === 'AGENT' && agentId) {
-      this.api.logoutAgent(agentId).subscribe({
+      this.api.updateAgentStatus(agentId, 'logout').subscribe({
         next: () => this.finalizeLogout(),
         error: () => this.finalizeLogout()
       });

@@ -271,8 +271,8 @@ export class TelephonyOverlayComponent implements OnInit {
     const currentCallId = this.session.call.callId;
     if (currentCallId) {
       this.apiService.updateCallStatus(currentCallId, 'COMPLETED').subscribe({
-        next: (res) => this.session.setCall(currentCallId, res.status),
-        error: (err) => console.error('Failed to mark call as complete', err)
+        next: (res: any) => this.session.setCall(currentCallId, res.status),
+        error: (err: any) => console.error('Failed to mark call as complete', err)
       });
     }
   }

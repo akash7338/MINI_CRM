@@ -119,12 +119,12 @@ export class AgentPanelComponent implements OnInit, OnDestroy {
   login() {
     this.errorMessage = '';
     const cleanId = this.agentId.trim();
-    this.api.loginAgent(cleanId).subscribe({
-      next: (res) => {
+    this.api.updateAgentStatus(cleanId, 'login').subscribe({
+      next: (res: any) => {
         this.session.setAgentStatus(this.session.mapAgentStatus(res.status));
         this.session.startHeartbeat();
       },
-      error: (err) => {
+      error: (err: any) => {
         if (err.status === 409) this.syncState(cleanId);
         else if (err.status === 401) this.errorMessage = 'Session expired. Please re-login as Admin.';
         else this.errorMessage = `Login failed: ${err.statusText || 'Connection error'}`;
@@ -135,12 +135,12 @@ export class AgentPanelComponent implements OnInit, OnDestroy {
   setAvailable() {
     this.errorMessage = '';
     const cleanId = this.agentId.trim();
-    this.api.setAgentState(cleanId, 'AVAILABLE').subscribe({
-      next: (res) => {
+    this.api.updateAgentStatus(cleanId, 'available').subscribe({
+      next: (res: any) => {
         this.session.setAgentStatus(this.session.mapAgentStatus(res.status));
         this.session.startHeartbeat();
       },
-      error: (err) => {
+      error: (err: any) => {
         if (err.status === 409) this.syncState(cleanId);
         else this.errorMessage = `Status update failed`;
       }
@@ -149,7 +149,7 @@ export class AgentPanelComponent implements OnInit, OnDestroy {
 
   private syncState(agentId: string) {
     this.api.getAgentState(agentId).subscribe({
-      next: (res) => {
+      next: (res: any) => {
         this.session.setAgentStatus(this.session.mapAgentStatus(res.status));
         this.session.startHeartbeat();
       },
@@ -160,13 +160,13 @@ export class AgentPanelComponent implements OnInit, OnDestroy {
   logout() {
     this.errorMessage = '';
     const cleanId = this.agentId.trim();
-    this.api.logoutAgent(cleanId).subscribe({
-      next: (res) => {
+    this.api.updateAgentStatus(cleanId, 'logout').subscribe({
+      next: (res: any) => {
         this.session.setAgentStatus(this.session.mapAgentStatus(res.status));
         this.session.stopHeartbeat();
         this.session.clearCall();
       },
-      error: (err) => this.errorMessage = `Logout failed`
+      error: (err: any) => this.errorMessage = `Logout failed`
     });
   }
 }

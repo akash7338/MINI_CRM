@@ -91,12 +91,12 @@ export class MetricsPanelComponent implements OnInit, OnDestroy {
     const tenantId = this.api.tenantId;
     if (!tenantId) return;
     this.api.getMetrics(tenantId).subscribe({
-      next: (res) => {
+      next: (res: any) => {
         this.metrics = res;
         this.loading = false;
         this.error = '';
       },
-      error: (err) => {
+      error: (err: any) => {
         if (err.status === 401) {
           this.error = 'Session expired. Please log in as admin.';
         } else {

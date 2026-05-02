@@ -107,8 +107,8 @@ export class TelephonyService {
       const currentCallId = this.session.call.callId;
       if (currentCallId) {
         this.apiService.updateCallStatus(currentCallId, 'IN_PROGRESS').subscribe({
-          next: (res) => this.session.setCall(currentCallId, res.status),
-          error: (err) => console.error('Failed to start call on backend', err)
+          next: (res: any) => this.session.setCall(currentCallId, res.status),
+          error: (err: any) => console.error('Failed to start call on backend', err)
         });
       }
     });
