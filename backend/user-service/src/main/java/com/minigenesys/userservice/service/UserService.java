@@ -31,9 +31,8 @@ public class UserService {
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     
-    // In a real microservices setup, you'd use a configured WebClient or Feign,
-    // but a RestTemplate is fine for this clean integration point.
-    private final RestTemplate restTemplate = new RestTemplate();
+    // Injected from RestTemplateConfig with connect/read timeouts configured
+    private final RestTemplate restTemplate;
     
     @Value("${services.agent-state.url:http://localhost:8086/api/v1/agents/internal}")
     private String agentStateServiceUrl;

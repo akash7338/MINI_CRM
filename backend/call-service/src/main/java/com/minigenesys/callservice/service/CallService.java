@@ -228,6 +228,12 @@ public class CallService {
         }
 
         for (Call call : activeCalls) {
+            // Idempotency: skip if already requeued by a previous delivery of this event
+            if (call.getStatus() == CallStatus.QUEUED) {
+                log.info("Call {} already requeued for agent {}. Skipping duplicate.", call.getId(), event.getAgentId());
+                continue;
+            }
+
             log.info("Recovering call: {} from disconnected agent: {}. Requeuing.", 
                 call.getId(), event.getAgentId());
 

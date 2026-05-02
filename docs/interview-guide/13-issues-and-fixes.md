@@ -163,4 +163,40 @@
     5. **API Consolidation & Type Safety:** Refactored the `ApiService` to use a unified `updateAgentStatus()` method and proper `HttpHeaders`. This eliminated duplicate function declarations and ensured consistent header propagation (e.g., `X-Tenant-Id`).
     6. **State-Gated WebSocket Subscriptions:** Implemented a "ready-check" and `onConnect` hook to ensure the app only subscribes to events after the STOMP handshake is successful and the `tenantId` is verified.
 - **Key Learning:** Real-time distributed systems require perfect alignment between the "Audio State" (Twilio), "Message State" (WebSocket), and "Database State" (REST API). Any break in this chain—even a simple Angular Change Detection delay or an out-of-order Kafka message—leads to "Ghost Calls" and system instability.
-- **Key Learning:** Real-time distributed systems require perfect alignment between the "Audio State" (Twilio), "Message State" (WebSocket), and "Database State" (REST API). Any break in this chain—even a simple Angular Change Detection delay—leads to "Ghost Calls" and system instability.
+
+---
+
+## 14. BUSY → OFFLINE Transition Silently Blocked (Circuit-Breaker Defeated)
+
+- **Problem:** Call rejection worked on the UI surface but the infinite re-assignment loop protection (introduced in Issue 13) was silently failing.
+- **Root Cause:** `AgentStateService.isValidTransition()` did not include `BUSY → OFFLINE` as a valid transition. When the dashboard called `POST /agents/{id}/logout` to force the agent offline before requeuing the rejected call, the backend returned `409 Conflict`. The Angular error handler caught it and fell through to requeue the call anyway — but **without the OFFLINE guarantee**. This meant the routing engine could still see the agent as AVAILABLE in Redis and immediately re-assign the same call.
+- **Impact:** The sequential circuit-breaker built in Issue 13 was completely neutralised. In single-agent environments, rejecting a call still caused an infinite re-assignment loop.
+- **Fix:** Added `BUSY → OFFLINE` to the valid transitions in `AgentStateService.isValidTransition()` with a clear comment explaining its purpose (forced logout during an active call).
+- **File:** `agent-state-service/.../service/AgentStateService.java`
+- **Key Learning:** A circuit-breaker that fails silently is worse than no circuit-breaker — it creates a false sense of security. Always validate that the entire chain succeeds, including backend state transitions that are prerequisites for subsequent steps.
+
+---
+
+## 15. Copilot-Reported Security & Reliability Hardening (Audit 2026-05-02)
+
+A 16-issue Copilot audit was run against the codebase. Of the 16 issues, 5 were fixed, 6 were already handled, and 5 were intentionally deferred. Key fixes applied:
+
+| # | Issue | Fix Applied |
+|---|-------|-------------|
+| 3/16 | `RestTemplate` in `UserService` had no timeout and was `new`'d inline | Created `RestTemplateConfig` bean with 5s connect / 10s read timeout via `SimpleClientHttpRequestFactory` |
+| 4/16 | `handleAgentDisconnect` in `CallService` had no idempotency check | Added early `continue` for calls already in `QUEUED` status, preventing duplicate requeue on Kafka re-delivery |
+| 12/16 | Internal API key compared with `String.equals()` (timing-attack vulnerable) | Replaced with `MessageDigest.isEqual()` for constant-time comparison |
+| 13/16 | `BUSY → OFFLINE` transition missing (see Issue 14 above) | Added to valid transitions |
+| 15/16 | JWT secret padded with zeros if < 32 bytes (silent security weakness) | Changed to fail-fast `IllegalArgumentException` on startup |
+
+**Issues confirmed as already handled:**
+- DB vs Redis sync race: both writes happen inline inside the same `@Transactional` method — no window.
+- User created before agent profile: `createAgentProfileInStateService()` is called first; any REST failure throws before `userRepository.save()`.
+- Kafka DLQ missing: `KafkaConfig` already wires `DefaultErrorHandler` + `DeadLetterPublishingRecoverer` with exponential backoff.
+- `createAgent` validation missing: `CreateAgentRequest` already has `@NotBlank` on `agentId` and `name`, with `@Valid` on the controller.
+- `@ElementCollection(EAGER)` on skills: correct for this use case — skills are always needed for Redis sync and the collection is tiny (1-3 items).
+
+**Issues intentionally deferred (production hardening only):**
+- Blocking Kafka `.get()` inside `@Transactional`: intentional design for publish-before-commit consistency. Risk only at scale under broker failure.
+- `detectDisconnects()` no distributed lock: single-instance deployment; ShedLock would require a new dependency.
+- DLQ topic naming: `{topic}.DLQ` convention is valid; auto-create enabled locally.

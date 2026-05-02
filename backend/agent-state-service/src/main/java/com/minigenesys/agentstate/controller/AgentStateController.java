@@ -28,7 +28,9 @@ public class AgentStateController {
             @RequestHeader("X-Tenant-Id") String tenantId,
             @Valid @RequestBody CreateAgentRequest request) {
         
-        if (providedKey == null || !providedKey.equals(internalKey)) {
+        if (providedKey == null || !java.security.MessageDigest.isEqual(
+                providedKey.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                internalKey.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
             return ResponseEntity.status(401).build();
         }
         

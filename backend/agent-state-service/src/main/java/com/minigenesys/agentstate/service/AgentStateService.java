@@ -226,6 +226,9 @@ public class AgentStateService {
             return true;
         if (oldStatus == AgentStatus.AVAILABLE && newStatus == AgentStatus.OFFLINE)
             return true;
+        // Allows forced logout during active calls (e.g., agent rejects a call)
+        if (oldStatus == AgentStatus.BUSY && newStatus == AgentStatus.OFFLINE)
+            return true;
         return false;
     }
 
