@@ -98,7 +98,10 @@ export class ApiService {
   }
 
   updateCallStatus(callId: string, status: string): Observable<any> {
-    const endpoint = status === 'COMPLETED' ? 'complete' : 'start';
+    let endpoint = 'start';
+    if (status === 'COMPLETED') endpoint = 'complete';
+    else if (status === 'REJECTED') endpoint = 'reject';
+    
     const options: any = this.getHeaders();
     if (this.tenantId) {
       options.headers = options.headers.set('X-Tenant-Id', this.tenantId);

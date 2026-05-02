@@ -110,6 +110,50 @@ public class CallService {
     }
 
     @Transactional
+    public CallResponse rejectCall(String callId, String tenantId) {
+        Call call = callRepository.findById(callId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Call not found"));
+
+        if (!call.getTenantId().equals(tenantId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
+        }
+
+        if (call.getStatus() != CallStatus.ROUTED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Call must be in ROUTED status to reject");
+        }
+
+        String rejectedAgentId = call.getAssignedAgentId();
+
+        // 1. Requeue the call
+        call.setStatus(CallStatus.QUEUED);
+        call.setAssignedAgentId(null);
+        call = callRepository.save(call);
+
+        // 2. Publish CALL_REQUEUED (same as new call event)
+        CallEvent requeueEvent = CallEvent.builder()
+                .callId(call.getId())
+                .tenantId(call.getTenantId())
+                .requiredSkills(call.getRequiredSkills())
+                .priority(call.getPriority())
+                .newCall(false)
+                .build();
+        callEventProducer.publishCallEvent(requeueEvent);
+
+        // 3. Free the agent who rejected the call
+        if (rejectedAgentId != null) {
+            CallLifecycleEvent event = CallLifecycleEvent.builder()
+                    .eventType("CALL_COMPLETED")
+                    .callId(call.getId())
+                    .tenantId(call.getTenantId())
+                    .agentId(rejectedAgentId)
+                    .build();
+            callEventProducer.publishLifecycleEvent(event);
+        }
+
+        return mapToResponse(call);
+    }
+
+    @Transactional
     public void handleRoutingEvent(RoutingEvent event) {
         log.info("Handling routing event for callId: {}, status: {}", event.getCallId(), event.getStatus());
         

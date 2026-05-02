@@ -47,6 +47,13 @@ public class CallController {
         return ResponseEntity.ok(callService.completeCall(callId, tenantId));
     }
 
+    @PostMapping("/{callId}/reject")
+    public ResponseEntity<CallResponse> rejectCall(
+            @PathVariable String callId,
+            @RequestHeader(value = "X-Tenant-Id", required = true) String tenantId) {
+        return ResponseEntity.ok(callService.rejectCall(callId, tenantId));
+    }
+
     @GetMapping("/health")
     public ResponseEntity<Map<String, String>> health() {
         return ResponseEntity.ok(Map.of("status", "UP"));

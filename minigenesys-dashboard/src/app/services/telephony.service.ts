@@ -100,6 +100,20 @@ export class TelephonyService {
   rejectCall(call: Call) {
     call.reject();
     this.incomingCallSubject.next(null);
+    
+    // Notify the backend that the agent rejected the call
+    // This allows the backend to requeue the call and free this agent
+    const currentCallId = this.session.call.callId;
+    if (currentCallId) {
+      this.apiService.updateCallStatus(currentCallId, 'REJECTED').subscribe({
+        next: () => {
+          console.log('Successfully rejected call on backend');
+          // Reset local UI call state
+          this.session.setCall(null, null);
+        },
+        error: (err) => console.error('Failed to notify backend of call rejection', err)
+      });
+    }
   }
 
   hangup() {
