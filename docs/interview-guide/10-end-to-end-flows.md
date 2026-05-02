@@ -308,12 +308,38 @@ QUEUED → ROUTED → IN_PROGRESS → COMPLETED
 ```
 
 - `QUEUED → ROUTED`: Set by call-service when it consumes an `ASSIGNED` routing-event
-- `ROUTED → IN_PROGRESS`: Set by `CallService.startCall()` (REST call from browser or Twilio)
-- `IN_PROGRESS → COMPLETED`: Set by `CallService.completeCall()`
+- `ROUTED → IN_PROGRESS`: Set by `CallService.updateCallStatus()` (REST call from browser or Twilio)
+- `IN_PROGRESS → COMPLETED`: Set by `CallService.updateCallStatus()`
 
 ---
 
-## 8. Heartbeat Disconnect Flow
+## 8. Agent Call Rejection Flow
+
+**Trigger:** Agent clicks "Reject" when a call is assigned to them.
+
+```
+Browser              API Gateway      Agent State Service         Call Service
+  │                      │                    │                        │
+  │ 1. POST /agents/{id}/logout               │                        │
+  │─────────────────────►│───────────────────►│                        │
+  │                      │                    │ Validate: oldStatus    │
+  │                      │                    │ UPDATE status = OFFLINE│
+  │                      │                    │ ZREM from skill queues │
+  │                      │                    │                        │
+  │ ◄── { status: OFFLINE } ──────────────────│                        │
+  │                      │                    │                        │
+  │ 2. POST /calls/{id}/status { "REJECTED" } │                        │
+  │─────────────────────►│────────────────────┼───────────────────────►│
+  │                      │                    │                        │ UPDATE status = QUEUED
+  │                      │                    │                        │ Publish call-events
+  │ ◄── { status: QUEUED } ───────────────────┼────────────────────────│
+```
+
+**Known Bug (Fixed):** Originally, the dashboard fired both REST calls simultaneously. Because Kafka processing is extremely fast, the call was requeued and immediately re-assigned back to the same agent before the `OFFLINE` status could be written to Redis. The dashboard now chains these calls sequentially, ensuring the agent is fully removed from routing queues before the call is requeued.
+
+---
+
+## 9. Heartbeat Disconnect Flow
 
 **Trigger:** The agent's browser crashes, they close the tab, or they hit F5 and the reload takes > 30 seconds.
 
@@ -360,7 +386,7 @@ Time 30-40s: AgentStateService.detectDisconnects() runs (every 10s)
 
 ---
 
-## 9. Twilio Inbound Call Flow
+## 10. Twilio Inbound Call Flow
 
 **Trigger:** A real phone call hits the Twilio number, which POSTs to the telephony-service webhook.
 
@@ -407,7 +433,7 @@ Phone Call          Twilio Cloud        Telephony Service      Call Service     
 
 ---
 
-## 10. WebSocket Real-Time Update Flow
+## 11. WebSocket Real-Time Update Flow
 
 **Trigger:** Any Kafka event is published by any service.
 
@@ -457,7 +483,7 @@ Any Service          Kafka                WebSocket Gateway           Browser
 
 ---
 
-## 11. Analytics Update Flow
+## 12. Analytics Update Flow
 
 **Trigger:** Any Kafka event is published.
 
@@ -498,7 +524,7 @@ Kafka                  Analytics Service (AnalyticsEventConsumer)          Redis
 
 ---
 
-## 12. Audit Event Flow
+## 13. Audit Event Flow
 
 **Trigger:** Any Kafka event is published across any topic.
 
