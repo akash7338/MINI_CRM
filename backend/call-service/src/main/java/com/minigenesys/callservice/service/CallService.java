@@ -139,6 +139,20 @@ public class CallService {
         } else if ("ERROR".equals(status) || "failed".equalsIgnoreCase(status)) {
             call.setStatus(CallStatus.FAILED);
             call.setRoutingFailureReason(event.getMessage());
+        } else if ("ABANDONED".equals(status)) {
+            call.setStatus(CallStatus.ABANDONED);
+            call.setRoutingFailureReason(event.getMessage());
+            
+            // If the call was previously routed, free the agent
+            if (call.getAssignedAgentId() != null) {
+                CallLifecycleEvent abandonEvent = CallLifecycleEvent.builder()
+                        .eventType("CALL_COMPLETED") // Forces agent back to AVAILABLE
+                        .callId(call.getId())
+                        .tenantId(call.getTenantId())
+                        .agentId(call.getAssignedAgentId())
+                        .build();
+                callEventProducer.publishLifecycleEvent(abandonEvent);
+            }
         }
 
         callRepository.save(call);

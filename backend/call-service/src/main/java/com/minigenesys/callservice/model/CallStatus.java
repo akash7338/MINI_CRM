@@ -6,5 +6,6 @@ public enum CallStatus {
     ROUTED,
     IN_PROGRESS,
     COMPLETED,
-    FAILED
+    FAILED,
+    ABANDONED
 }

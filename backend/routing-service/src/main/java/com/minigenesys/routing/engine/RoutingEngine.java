@@ -109,12 +109,12 @@ public class RoutingEngine {
     }
 
     private void saveAssignment(CallRequest call, String agentId) {
-        Assignment assignment = Assignment.builder()
-                .callId(call.getCallId())
-                .agentId(agentId)
-                .tenantId(call.getTenantId())
-                .assignedAt(Instant.now())
-                .build();
+        Assignment assignment = assignmentRepository.findByCallId(call.getCallId())
+                .orElseGet(() -> Assignment.builder().callId(call.getCallId()).build());
+        
+        assignment.setAgentId(agentId);
+        assignment.setTenantId(call.getTenantId());
+        assignment.setAssignedAt(Instant.now());
         
         assignmentRepository.save(assignment);
         

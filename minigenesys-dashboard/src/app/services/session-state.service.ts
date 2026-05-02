@@ -69,6 +69,11 @@ export class SessionStateService implements OnDestroy {
         const uiStatus = this.mapAgentStatus(res.status);
         this.setAgentStatus(uiStatus);
         
+        // Ensure heartbeat resumes after a page refresh
+        if (uiStatus !== 'Offline') {
+          this.startHeartbeat();
+        }
+        
         if (res.activeCallId && res.tenantId) {
           // Fetch the real status from call-service instead of guessing
           this.api.getCall(res.activeCallId, res.tenantId).subscribe({

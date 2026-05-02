@@ -99,7 +99,11 @@ export class ApiService {
 
   updateCallStatus(callId: string, status: string): Observable<any> {
     const endpoint = status === 'COMPLETED' ? 'complete' : 'start';
-    return this.http.post(`${this.GATEWAY_URL}/api/v1/calls/${callId}/${endpoint}`, {}, this.getHeaders());
+    const options: any = this.getHeaders();
+    if (this.tenantId) {
+      options.headers = options.headers.set('X-Tenant-Id', this.tenantId);
+    }
+    return this.http.post(`${this.GATEWAY_URL}/api/v1/calls/${callId}/${endpoint}`, {}, options);
   }
 
   getCall(callId: string, tenantId: string): Observable<any> {

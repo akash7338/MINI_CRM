@@ -2,6 +2,8 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Device, Call } from '@twilio/voice-sdk';
 import { BehaviorSubject, Observable, tap } from 'rxjs';
+import { ApiService } from './api.service';
+import { SessionStateService } from './session-state.service';
 
 export interface TelephonyToken {
   token: string;
@@ -22,7 +24,11 @@ export class TelephonyService {
   private incomingCallSubject = new BehaviorSubject<Call | null>(null);
   incomingCall$ = this.incomingCallSubject.asObservable();
 
-  constructor(private http: HttpClient) {}
+  constructor(
+    private http: HttpClient,
+    private apiService: ApiService,
+    private session: SessionStateService
+  ) {}
 
   async initialize(agentId: string): Promise<void> {
     if (this.device) return;
@@ -52,10 +58,28 @@ export class TelephonyService {
       call.on('disconnect', () => {
         this.incomingCallSubject.next(null);
         this.activeCallSubject.next(null);
+        
+        // Ensure the backend knows the call ended if the caller hung up
+        const currentCallId = this.session.call.callId;
+        if (currentCallId) {
+          this.apiService.updateCallStatus(currentCallId, 'COMPLETED').subscribe({
+            next: (res) => this.session.setCall(currentCallId, res.status),
+            error: (err) => console.error('Failed to notify backend of call completion', err)
+          });
+        }
       });
 
       call.on('cancel', () => {
         this.incomingCallSubject.next(null);
+        
+        // If caller hangs up before we answer, we need to clear the backend state
+        const currentCallId = this.session.call.callId;
+        if (currentCallId) {
+          this.apiService.updateCallStatus(currentCallId, 'COMPLETED').subscribe({
+            next: (res) => this.session.setCall(currentCallId, res.status),
+            error: (err) => console.error('Failed to clear abandoned call', err)
+          });
+        }
       });
     });
 

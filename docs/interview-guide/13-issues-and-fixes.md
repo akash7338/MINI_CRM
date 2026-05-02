@@ -90,3 +90,49 @@
 - **Impact:** None. It is a completely harmless false alarm in a local laptop environment.
 - **Fix:** No fix required. Normal behavior for suspended processes.
 - **Key Learning:** Enterprise server software assumes it runs on an always-awake infrastructure. It interprets routine local sleep events as critical performance or scheduling failures.
+
+---
+
+## 9. "Call in Queue" (Agent State Sync Failure After Twilio Disconnect)
+
+- **Problem:** When an agent picks up a live Twilio call and then disconnects via the softphone, consecutive inbound calls fail to connect and go straight to "Call in Queue", eventually abandoning.
+- **Root Cause:** The Angular frontend did not correctly notify the backend (`call-service`) that the call had ended. Although we previously added `apiService.updateCallStatus(callId, 'COMPLETED')` on hangup, it was failing silently with a **400 Bad Request**. The `CallController` in the backend explicitly requires the `X-Tenant-Id` header (`@RequestHeader(required = true)`), but the `updateCallStatus` method in `api.service.ts` was not appending this header. Because the API request failed, `call-service` never transitioned the call to `COMPLETED`, the `CALL_COMPLETED` lifecycle event was never published, and the `agent-state-service` never reset the agent from `BUSY` back to `AVAILABLE`.
+- **Impact:** Agents remain permanently locked in a `BUSY` state after their first call, breaking the routing engine and causing 100% of subsequent calls to be queued.
+- **Fix:** 
+  1. Updated `telephony.service.ts` and `telephony-overlay.component.ts` on the frontend to explicitly call `ApiService.updateCallStatus()`. 
+  2. Fixed `api.service.ts` to append `options.headers.set('X-Tenant-Id', this.tenantId)` to the `updateCallStatus` POST request, allowing the API call to succeed.
+- **Key Learning:** When adding new API calls to frontend services, always verify the exact header requirements (`required = true`) of the backend controller. A silent HTTP 400 error in a state-critical API can permanently break the distributed state machine.
+
+---
+
+## 10. Phantom Disconnects / Active Call Requeued on Browser Refresh
+
+- **Problem:** An agent was actively engaged in a call. Without warning, the UI appeared to briefly flicker/reload. A few seconds later, the call was abruptly stripped from them, sent back to the queue, and eventually abandoned, despite the agent never explicitly ending the call.
+- **Root Cause:** When running locally, saving a file in the code editor triggers an **Angular Live Reload (HMR)**, which is identical to a hard browser refresh. When the app reloaded, `SessionStateService` successfully rehydrated the agent's state from the backend (knowing they were `On Call`). However, the `startHeartbeat()` method was omitted during this rehydration flow. The Angular app stopped sending its 15-second heartbeats. Exactly 30 seconds later, the backend `agent-state-service` assumed the agent had crashed, marking them `OFFLINE`. This triggered an agent recovery event in `call-service`, which stripped the active call and requeued it to protect the customer. When the next Live Reload hit, the agent state loaded as `OFFLINE`, and the call disappeared from the UI entirely.
+- **Impact:** Any page refresh (or live reload) during an active call guaranteed the call would be dropped and requeued 30 seconds later.
+- **Fix:** Updated `SessionStateService.loadInitialState()` to explicitly call `this.startHeartbeat()` if the rehydrated UI status is not `Offline`. 
+- **Key Learning:** State rehydration is a two-part process. Restoring the visual UI state is not enough; you must also explicitly restore any background tasks, loops, or heartbeats that maintain the infrastructure contract for that state.
+
+---
+
+## 11. Agent Locked in BUSY Status if Caller Hangs Up While Ringing
+
+- **Problem:** An inbound call rings on the agent's screen. Before the agent can click "Accept", the caller hangs up. The ringing stops and the popup disappears, but the agent's status remains locked in `BUSY` on the backend, preventing them from receiving any future calls.
+- **Root Cause:** The `telephony.service.ts` successfully listened to the Twilio `call.on('cancel')` event (triggered when the caller hangs up early) and cleared the UI popup. However, it failed to notify the `call-service` backend that the call had been abandoned/completed. Since the backend had already `ASSIGNED` the call to the agent and marked them `BUSY`, it waited indefinitely for the call to finish.
+- **Impact:** Agents become permanently locked if a caller hangs up before they answer.
+- **Fix:** Updated the `call.on('cancel')` listener in `telephony.service.ts` to explicitly call `apiService.updateCallStatus(callId, 'COMPLETED')`. This ensures the backend clears the abandoned call and transitions the agent back to `AVAILABLE`.
+- **Key Learning:** Edge cases in the state machine (like abandoning a call before it connects) require the same explicit backend synchronization as standard happy-path flows.
+
+---
+
+## 12. Routing Service Crash on Requeue and Permanent Agent Lock on Abandonment
+
+- **Problem:** When an active call was requeued (e.g., due to an agent going offline), the `routing-service` violently crashed with a `duplicate key value violates unique constraint` Postgres error. It then threw the call into a retry loop, crashing 10 times in a row. Finally, it abandoned the call, but left the original agent permanently locked in `BUSY`.
+- **Root Cause:** 
+  1. **Postgres Crash:** The `assignments` table in `routing-service` had a `unique = true` constraint on `call_id`. When the `routing-service` picked up the requeued call and tried to assign it, it blindly attempted to insert a *new* row into the table with the same `call_id`. This violated the Postgres constraint, crashing the assignment logic and forcing the call into the error queue.
+  2. **Agent Lock:** After failing 10 times, the `RetryProcessor` published an `ABANDONED` event. However, the `CallService` (which listens to routing events) didn't execute any agent cleanup logic for `ABANDONED` calls. It just left the call status as `ABANDONED` and never published a `CALL_COMPLETED` event, leaving the original assigned agent stuck as `BUSY` forever.
+- **Impact:** Requeued calls never reached a new agent, generated massive database error spam, and permanently corrupted the original agent's state, preventing them from receiving future calls.
+- **Fix:** 
+  1. Updated `RoutingEngine.java` to use an "Upsert" pattern: `assignmentRepository.findByCallId(callId).orElseGet(...)`. Now, when a call is reassigned, it smoothly updates the existing database record.
+  2. Updated `CallService.java` to explicitly handle the `ABANDONED` routing status. If a call is abandoned and has an assigned agent, it now publishes a `CALL_COMPLETED` event to force the `agent-state-service` to free the stuck agent.
+- **Key Learning:** In distributed state machines, database constraints (like `UNIQUE`) can completely break recovery/requeue flows. Additionally, every terminal state in a workflow (including failure states like `ABANDONED`) must have explicitly mapped cleanup logic to prevent resource leaks (stuck agents).

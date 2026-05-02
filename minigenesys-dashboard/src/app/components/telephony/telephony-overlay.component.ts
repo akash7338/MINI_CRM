@@ -1,5 +1,7 @@
 import { Component, OnInit } from '@angular/core';
 import { TelephonyService } from '../../services/telephony.service';
+import { ApiService } from '../../services/api.service';
+import { SessionStateService } from '../../services/session-state.service';
 import { CommonModule } from '@angular/common';
 import { Call } from '@twilio/voice-sdk';
 
@@ -216,7 +218,11 @@ export class TelephonyOverlayComponent implements OnInit {
   duration = 0;
   timer: any;
 
-  constructor(private telephonyService: TelephonyService) {}
+  constructor(
+    private telephonyService: TelephonyService,
+    private apiService: ApiService,
+    private session: SessionStateService
+  ) {}
 
   ngOnInit() {
     this.telephonyService.incomingCall$.subscribe(call => {
@@ -260,5 +266,14 @@ export class TelephonyOverlayComponent implements OnInit {
 
   onHangup() {
     this.telephonyService.hangup();
+    
+    // Notify the backend that the call has ended so agent state resets
+    const currentCallId = this.session.call.callId;
+    if (currentCallId) {
+      this.apiService.updateCallStatus(currentCallId, 'COMPLETED').subscribe({
+        next: (res) => this.session.setCall(currentCallId, res.status),
+        error: (err) => console.error('Failed to mark call as complete', err)
+      });
+    }
   }
 }
