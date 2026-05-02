@@ -16,7 +16,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
-import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -37,7 +36,7 @@ public class AgentStateService {
     private static final String AGENT_STATE_KEY_TPL = "tenant:%s:agent:%s:state";
     private static final String SKILL_KEY_TPL = "tenant:%s:skill:%s:available";
     private static final String HEARTBEAT_KEY_TPL = "tenant:%s:agent:%s:heartbeat";
-    
+
     private static final long HEARTBEAT_TIMEOUT_MS = 30000;
 
     @Transactional
@@ -69,7 +68,8 @@ public class AgentStateService {
         }
 
         if (!isValidTransition(oldStatus, newStatus)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Invalid state transition from " + oldStatus + " to " + newStatus);
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Invalid state transition from " + oldStatus + " to " + newStatus);
         }
 
         agent.setStatus(newStatus);
@@ -101,7 +101,7 @@ public class AgentStateService {
 
         String heartbeatKey = String.format(HEARTBEAT_KEY_TPL, tenantId, agentId);
         redisTemplate.opsForValue().set(heartbeatKey, String.valueOf(now), HEARTBEAT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-        
+
         log.debug("Heartbeat received for agent {} in tenant {}", agentId, tenantId);
     }
 
@@ -110,14 +110,15 @@ public class AgentStateService {
     public void detectDisconnects() {
         long threshold = Instant.now().toEpochMilli() - HEARTBEAT_TIMEOUT_MS;
         List<AgentStatus> activeStatuses = List.of(AgentStatus.AVAILABLE, AgentStatus.BUSY);
-        
+
         List<Agent> expiredAgents = agentRepository.findByStatusInAndLastHeartbeatAtBefore(activeStatuses, threshold);
         // Also check agents who never sent a heartbeat but are active (if any)
         List<Agent> neverHeartbeatAgents = agentRepository.findByStatusInAndLastHeartbeatAtIsNull(activeStatuses);
-        
+
         expiredAgents.addAll(neverHeartbeatAgents);
 
-        if (expiredAgents.isEmpty()) return;
+        if (expiredAgents.isEmpty())
+            return;
 
         log.info("Detected {} disconnected agents", expiredAgents.size());
 
@@ -133,10 +134,10 @@ public class AgentStateService {
 
             updateRedisState(agent, oldStatus, AgentStatus.OFFLINE);
             publishEvent(agent, oldStatus, AgentStatus.OFFLINE, "AGENT_DISCONNECTED");
-            
+
             // Explicitly delete heartbeat key
             redisTemplate.delete(String.format(HEARTBEAT_KEY_TPL, agent.getTenantId(), agent.getId()));
-            
+
             log.info("Agent {} marked OFFLINE due to heartbeat timeout", agent.getId());
         }
     }
@@ -166,10 +167,11 @@ public class AgentStateService {
         AgentStatus oldStatus = agent.getStatus();
 
         if (oldStatus == AgentStatus.OFFLINE) {
-            log.warn("Ignoring routing event for agent {} because they are OFFLINE. Breaking the ping-pong loop.", agent.getId());
+            log.warn("Ignoring routing event for agent {} because they are OFFLINE. Breaking the ping-pong loop.",
+                    agent.getId());
             return;
         }
-        
+
         // Update DB
         agent.setStatus(AgentStatus.BUSY);
         agent.setActiveCallId(event.getCallId());
@@ -178,10 +180,10 @@ public class AgentStateService {
 
         // Update Redis (Ensuring consistency with routing-service direct mutation)
         updateRedisState(agent, oldStatus, AgentStatus.BUSY);
-        
+
         // Publish agent-events
         publishEvent(agent, oldStatus, AgentStatus.BUSY, "AGENT_BUSY");
-        
+
         log.info("Agent {} state synchronized to BUSY", agent.getId());
     }
 
@@ -191,7 +193,8 @@ public class AgentStateService {
 
         Optional<Agent> agentOpt = agentRepository.findByIdAndTenantId(event.getAgentId(), event.getTenantId());
         if (agentOpt.isEmpty()) {
-            log.warn("Agent {} not found in tenant {} for call completion update", event.getAgentId(), event.getTenantId());
+            log.warn("Agent {} not found in tenant {} for call completion update", event.getAgentId(),
+                    event.getTenantId());
             return;
         }
 
@@ -213,25 +216,31 @@ public class AgentStateService {
     }
 
     private boolean isValidTransition(AgentStatus oldStatus, AgentStatus newStatus) {
-        if (oldStatus == newStatus) return false;
-        if (oldStatus == AgentStatus.OFFLINE && newStatus == AgentStatus.AVAILABLE) return true;
-        if (oldStatus == AgentStatus.AVAILABLE && newStatus == AgentStatus.BUSY) return true;
-        if (oldStatus == AgentStatus.BUSY && newStatus == AgentStatus.AVAILABLE) return true;
-        if (oldStatus == AgentStatus.AVAILABLE && newStatus == AgentStatus.OFFLINE) return true;
+        if (oldStatus == newStatus)
+            return false;
+        if (oldStatus == AgentStatus.OFFLINE && newStatus == AgentStatus.AVAILABLE)
+            return true;
+        if (oldStatus == AgentStatus.AVAILABLE && newStatus == AgentStatus.BUSY)
+            return true;
+        if (oldStatus == AgentStatus.BUSY && newStatus == AgentStatus.AVAILABLE)
+            return true;
+        if (oldStatus == AgentStatus.AVAILABLE && newStatus == AgentStatus.OFFLINE)
+            return true;
         return false;
     }
 
     private void updateRedisState(Agent agent, AgentStatus oldStatus, AgentStatus newStatus) {
         String stateKey = String.format(AGENT_STATE_KEY_TPL, agent.getTenantId(), agent.getId());
-        
+
         // Always update the state hash
         redisTemplate.opsForHash().put(stateKey, "status", newStatus.name());
         if (agent.getLastAssignedTime() != null) {
             redisTemplate.opsForHash().put(stateKey, "lastAssignedTime", String.valueOf(agent.getLastAssignedTime()));
         }
-        
+
         if (newStatus == AgentStatus.AVAILABLE) {
-            long score = agent.getLastAssignedTime() != null ? agent.getLastAssignedTime() : Instant.now().toEpochMilli();
+            long score = agent.getLastAssignedTime() != null ? agent.getLastAssignedTime()
+                    : Instant.now().toEpochMilli();
             for (String skill : agent.getSkills()) {
                 String skillKey = String.format(SKILL_KEY_TPL, agent.getTenantId(), skill);
                 redisTemplate.opsForZSet().add(skillKey, agent.getId(), score);
@@ -242,9 +251,9 @@ public class AgentStateService {
                 redisTemplate.opsForZSet().remove(skillKey, agent.getId());
             }
         }
-        
+
         if (newStatus == AgentStatus.OFFLINE) {
-             redisTemplate.delete(stateKey);
+            redisTemplate.delete(stateKey);
         }
     }
 
@@ -264,10 +273,9 @@ public class AgentStateService {
 
     public Map<String, Long> getCounts(String tenantId) {
         return Map.of(
-            "AVAILABLE", agentRepository.countByTenantIdAndStatus(tenantId, AgentStatus.AVAILABLE),
-            "BUSY", agentRepository.countByTenantIdAndStatus(tenantId, AgentStatus.BUSY),
-            "OFFLINE", agentRepository.countByTenantIdAndStatus(tenantId, AgentStatus.OFFLINE)
-        );
+                "AVAILABLE", agentRepository.countByTenantIdAndStatus(tenantId, AgentStatus.AVAILABLE),
+                "BUSY", agentRepository.countByTenantIdAndStatus(tenantId, AgentStatus.BUSY),
+                "OFFLINE", agentRepository.countByTenantIdAndStatus(tenantId, AgentStatus.OFFLINE));
     }
 
     private AgentStateResponse mapToResponse(Agent agent) {
