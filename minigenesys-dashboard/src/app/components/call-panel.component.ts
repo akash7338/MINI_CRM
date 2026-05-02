@@ -9,33 +9,36 @@ import { Subscription } from 'rxjs';
   standalone: true,
   imports: [CommonModule],
   template: `
-    <div class="card" style="height: 100%;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+    <div class="card" style="height: 100%; display: flex; flex-direction: column;">
+      <div class="card-header">
         <div>
-          <h2 style="margin: 0;">Call Controls</h2>
-          <p style="margin: 4px 0 0 0; font-size: 13px; color: var(--text-muted);">Manage active interactions</p>
+          <div class="card-title">Call Controls</div>
+          <div class="card-subtitle">Manage active interactions</div>
         </div>
         <span *ngIf="callStatus" class="status-badge" [ngClass]="getStatusClass()">
+          <span class="status-dot" [ngClass]="getStatusDotClass()"></span>
           {{ getDisplayStatus() }}
         </span>
       </div>
 
-      <div *ngIf="!callId" style="flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 40px 0; border: 2px dashed var(--border); border-radius: var(--radius-lg); margin-bottom: 24px; background: var(--neutral-soft);">
-        <div style="width: 48px; height: 48px; background: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; box-shadow: var(--shadow-card);">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+      <!-- Empty State -->
+      <div *ngIf="!callId" class="empty-state" style="flex: 1; margin-bottom: 20px;">
+        <div class="empty-state-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
         </div>
-        <p style="text-align: center; color: var(--text-muted); font-size: 14px; font-weight: 500;">No active calls at the moment</p>
+        <div class="empty-state-text">No active calls at the moment</div>
       </div>
 
-      <div *ngIf="callId" class="card" style="background: var(--neutral-soft); border: none; margin-bottom: 24px; padding: 16px;">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
+      <!-- Active Call Card -->
+      <div *ngIf="callId" class="card-inner" style="margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px;">
           <div>
-            <span style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">Active Call</span>
-            <div style="font-family: monospace; font-size: 14px; font-weight: 700; color: var(--text-main); margin-top: 4px;">ID: {{ callId!.substring(0, 13) }}...</div>
+            <div style="font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em;">Active Call</div>
+            <div class="font-mono" style="font-size: 14px; font-weight: 700; color: var(--text-main); margin-top: 4px;">ID: {{ callId!.substring(0, 13) }}...</div>
           </div>
-          <div *ngIf="callStatus === 'IN_PROGRESS'" style="display: flex; align-items: center; gap: 6px;">
-             <div class="pulse" style="width: 8px; height: 8px; background: var(--danger); border-radius: 50%;"></div>
-             <span style="font-size: 12px; font-weight: 700; color: var(--danger);">LIVE</span>
+          <div *ngIf="callStatus === 'IN_PROGRESS'" class="live-indicator">
+            <div class="live-indicator-dot"></div>
+            LIVE
           </div>
         </div>
         
@@ -50,34 +53,28 @@ import { Subscription } from 'rxjs';
         </div>
       </div>
 
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: auto;">
+      <!-- Action Buttons -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: auto;">
         <button class="btn btn-outline" (click)="createCall()" [disabled]="!!callId" style="grid-column: span 2; justify-content: center;">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
           Simulate Call
         </button>
         <button class="btn btn-primary" (click)="startCall()" [disabled]="callStatus !== 'ROUTED'" style="justify-content: center;">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-          Start Call
+          Answer
         </button>
-        <button class="btn btn-outline" style="color: var(--danger); border-color: var(--danger); justify-content: center;" (click)="completeCall()" [disabled]="callStatus !== 'IN_PROGRESS'">
+        <button class="btn btn-danger-outline" (click)="completeCall()" [disabled]="callStatus !== 'IN_PROGRESS'" style="justify-content: center;">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="9" x2="15" y2="15"></line><line x1="15" y1="9" x2="9" y2="15"></line></svg>
-          Complete Call
+          End Call
         </button>
       </div>
 
-      <div *ngIf="error" style="margin-top: 16px; padding: 12px; background: var(--danger-soft); color: var(--danger); border-radius: var(--radius-md); font-size: 13px; font-weight: 600;">
+      <div *ngIf="error" class="alert alert-error" style="margin-top: 16px;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
         {{ error }}
       </div>
     </div>
-  `,
-  styles: [`
-    @keyframes pulse {
-      0% { transform: scale(1); opacity: 1; }
-      50% { transform: scale(1.5); opacity: 0.5; }
-      100% { transform: scale(1); opacity: 1; }
-    }
-    .pulse { animation: pulse 2s infinite ease-in-out; }
-  `]
+  `
 })
 export class CallPanelComponent implements OnInit, OnDestroy {
   callId: string | null = null;
@@ -85,7 +82,7 @@ export class CallPanelComponent implements OnInit, OnDestroy {
   error: string | null = null;
   private sub?: Subscription;
 
-  constructor(private api: ApiService, private session: SessionStateService) {}
+  constructor(public api: ApiService, private session: SessionStateService) {}
 
   ngOnInit() {
     // Rehydrate from shared state on mount
@@ -102,12 +99,22 @@ export class CallPanelComponent implements OnInit, OnDestroy {
 
   getStatusClass() {
     switch (this.callStatus) {
-      case 'QUEUED': return 'status-badge status-queued';
-      case 'ROUTED': return 'status-badge status-progress';
-      case 'ASSIGNED': return 'status-badge status-progress';
-      case 'IN_PROGRESS': return 'status-badge status-progress';
-      case 'CALL_COMPLETED': return 'status-badge status-available';
-      default: return 'status-badge status-offline';
+      case 'QUEUED': return 'status-queued';
+      case 'ROUTED': return 'status-progress';
+      case 'ASSIGNED': return 'status-progress';
+      case 'IN_PROGRESS': return 'status-danger';
+      case 'CALL_COMPLETED': return 'status-available';
+      default: return 'status-offline';
+    }
+  }
+
+  getStatusDotClass() {
+    switch (this.callStatus) {
+      case 'QUEUED': return 'busy';
+      case 'ROUTED': return '';
+      case 'IN_PROGRESS': return 'live';
+      case 'CALL_COMPLETED': return 'available';
+      default: return 'offline';
     }
   }
 
