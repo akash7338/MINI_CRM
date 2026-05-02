@@ -60,32 +60,9 @@ export class ApiService {
     localStorage.clear();
   }
 
-  updateAgentStatus(agentId: string, status: 'available' | 'busy' | 'logout'): Observable<any> {
+  updateAgentStatus(agentId: string, status: 'available' | 'busy' | 'logout' | 'login'): Observable<any> {
     const endpoint = `${this.GATEWAY_URL}/api/v1/agents/${agentId}/${status}`;
-    return this.http.post(endpoint, {}, {
-      headers: this.getHeaders()
-    });
-  }
-
-  // Helper to handle 401s globally if needed, or just let components handle it.
-  ensureAuth(): Observable<any> {
-    const token = localStorage.getItem('token');
-    if (!token) throw new Error('Not authenticated');
-    return new Observable(obs => obs.next(token));
-  }
-
-  // Agent API
-  loginAgent(agentId: string): Observable<any> {
-    return this.http.post(`${this.GATEWAY_URL}/api/v1/agents/${agentId}/login`, {}, this.getHeaders());
-  }
-
-  logoutAgent(agentId: string): Observable<any> {
-    return this.http.post(`${this.GATEWAY_URL}/api/v1/agents/${agentId}/logout`, {}, this.getHeaders());
-  }
-
-  setAgentState(agentId: string, status: string): Observable<any> {
-    const endpoint = status.toLowerCase() === 'available' ? 'available' : 'busy';
-    return this.http.post(`${this.GATEWAY_URL}/api/v1/agents/${agentId}/${endpoint}`, {}, this.getHeaders());
+    return this.http.post(endpoint, {}, this.getHeaders());
   }
 
   getAgentState(agentId: string): Observable<any> {
@@ -111,26 +88,30 @@ export class ApiService {
     
     const options: any = this.getHeaders();
     if (this.tenantId) {
-      options.headers = options.headers.set('X-Tenant-Id', this.tenantId);
+      options.headers = (options.headers as HttpHeaders).set('X-Tenant-Id', this.tenantId);
     }
     return this.http.post(`${this.GATEWAY_URL}/api/v1/calls/${callId}/${endpoint}`, {}, options);
   }
 
   getCall(callId: string, tenantId: string): Observable<any> {
     const options: any = this.getHeaders();
-    options.headers = options.headers.set('X-Tenant-Id', tenantId);
+    options.headers = (options.headers as HttpHeaders).set('X-Tenant-Id', tenantId);
     return this.http.get(`${this.GATEWAY_URL}/api/v1/calls/${callId}`, options);
   }
 
   // Analytics API
   getMetrics(tenantId: string): Observable<any> {
-    return this.http.get(`${this.GATEWAY_URL}/api/v1/analytics/${tenantId}/metrics`, this.getHeaders());
+    const options: any = this.getHeaders();
+    if (tenantId) {
+      options.headers = (options.headers as HttpHeaders).set('X-Tenant-Id', tenantId);
+    }
+    return this.http.get(`${this.GATEWAY_URL}/api/v1/analytics/${tenantId}/metrics`, options);
   }
 
   // Admin APIs
   createAgent(tenantId: string, agentData: any): Observable<any> {
     const options: any = this.getHeaders();
-    options.headers = options.headers.set('X-Tenant-Id', tenantId);
+    options.headers = (options.headers as HttpHeaders).set('X-Tenant-Id', tenantId);
     return this.http.post(`${this.GATEWAY_URL}/api/v1/users/agents`, agentData, options);
   }
 }
