@@ -23,18 +23,22 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
 
     private final JwtUtil jwtUtil;
 
+    // LOMBOK DOES THIS FOR YOU AUTOMATICALLY WHEN U USE @RequiredArgsConstructor
+    // public JwtAuthenticationFilter(JwtUtil jwtUtil) {
+    // this.jwtUtil = jwtUtil;
+    // }
+
     private static final List<String> OPEN_ENDPOINTS = List.of(
             "/api/v1/auth/login",
             "/actuator/health",
             "/ws",
-            "/api/v1/telephony/twilio/"
-    );
+            "/api/v1/telephony/twilio/");
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         ServerHttpRequest request = exchange.getRequest();
         String path = request.getURI().getPath();
- 
+
         // Check if path is open
         if (isSecured(path)) {
             if (!request.getHeaders().containsKey(HttpHeaders.AUTHORIZATION)) {
@@ -65,7 +69,8 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
 
                 // Simple RBAC
                 if ("AGENT".equals(role)) {
-                    if (path.startsWith("/api/v1/agents/") && agentId != null && !path.startsWith("/api/v1/agents/" + agentId)) {
+                    if (path.startsWith("/api/v1/agents/") && agentId != null
+                            && !path.startsWith("/api/v1/agents/" + agentId)) {
                         return onError(exchange, "Access denied to other agent profiles", HttpStatus.FORBIDDEN);
                     }
                     if (path.startsWith("/api/v1/users/")) {
@@ -81,7 +86,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
                         .header("X-Tenant-Id", tenantId)
                         .header("X-User-Id", userId != null ? userId : "")
                         .header("X-User-Role", role != null ? role : "");
-                        
+
                 if (agentId != null && !agentId.isBlank()) {
                     requestBuilder.header("X-Agent-Id", agentId);
                 }
