@@ -142,16 +142,16 @@ Each service owns its own PostgreSQL database. No service directly queries anoth
 
 Redis serves as the **hot state layer** — the fast, in-memory source of truth for real-time decisions.
 
-| Key Pattern                        | Type             | Owner Service          | Purpose                                          |
-|--------------------------------    |------------------|------------------------|--------------------------------------------------|
-| `tenant:{id}:agent:{id}:state`     | Hash             | Agent State Service    | Agent's current status + last assigned time      |
-| `tenant:{id}:skill:{skill}:available`| Sorted Set     | Agent State Service    | Available agents per skill  , scored by LRU      |
-| `tenant:{id}:agent:{id}:heartbeat` | String           | Agent State Service    | Heartbeat timestamp, TTL = 30s                   |
-| `tenant:{id}:call:queue`           | Sorted Set       | Routing Service        | Calls waiting for agents, scored by priority     |
-| `routing:lock:call:{id}`           | String           | Routing Service        | Distributed lock to prevent duplicate routing    |
-| `routing:assignment:call:{id}`     | String           | Routing Service        | Idempotency cache — remembers which agent was assigned |
-| `routing:retry:{tenant}:{call}:*`  | Multiple         | Routing Service (RetryProcessor) | Retry count, last retry time, call data |
-| `analytics:{tenant}:*`             | Strings          | Analytics Service      | Real-time counters (queue depth, agent counts) |
+| Key Pattern                          | Type             | Owner Service          | Purpose                                          |
+|--------------------------------------|------------------|------------------------|--------------------------------------------------|
+| `tenant:{id}:agent:{id}:state`       | Hash             | Agent State Service    | Agent's current status + last assigned time      |
+| `tenant:{id}:skill:{skill}:available`| Sorted Set       | Agent State Service    | Available agents per skill  , scored by LRU      |
+| `tenant:{id}:agent:{id}:heartbeat`   | String           | Agent State Service    | Heartbeat timestamp, TTL = 30s                   |
+| `tenant:{id}:call:queue`             | Sorted Set       | Routing Service        | Calls waiting for agents, scored by priority     |
+| `routing:lock:call:{id}`             | String           | Routing Service        | Distributed lock to prevent duplicate routing    |
+| `routing:assignment:call:{id}`       | String           | Routing Service        | Idempotency cache — remembers which agent was assigned |
+| `routing:retry:{tenant}:{call}:*`    | Multiple         | Routing Service (RetryProcessor) | Retry count, last retry time, call data |
+| `analytics:{tenant}:*`               | Strings          | Analytics Service      | Real-time counters (queue depth, agent counts) |
 
 ---
 
