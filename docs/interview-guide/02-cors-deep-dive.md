@@ -82,3 +82,56 @@ A single route can be configured to handle multiple distinct URL patterns using 
 *   **Logical OR:** The Gateway treats the comma as an "OR" condition. If the request matches **either** path, it will be routed.
 *   **Efficiency:** This allows you to group related functional paths (like Authentication and User Profile management) under a single microservice without duplicating the route configuration.
 *   **Shared Logic:** Any filters (like `JwtAuthenticationFilter`) applied to this route ID will automatically apply to all paths listed in that predicate.
+
+---
+
+## 7. The Internal Block (Security via Routing)
+The Gateway can act as a **Security Firewall** by blocking specific "Internal-Only" paths before they ever reach your microservices.
+
+**Example from your `application.yml`:**
+```yaml
+- id: agent-state-internal-block
+  predicates:
+    - Path=/api/v1/agents/internal
+  filters:
+    - SetStatus=403
+```
+
+**Key Concepts:**
+*   **Why use it?** Some endpoints are designed for service-to-service communication (e.g., User Service calling Agent Service). These often don't require JWTs. The Gateway ensures a browser user cannot "guess" the URL and bypass security.
+*   **403 Forbidden:** The Gateway immediately kills the request and returns a 403 status.
+*   **Specificity at Work:** Because the `/internal` path is **more specific** than the general `/agents/**` path, the Gateway's "Longest Prefix" rule ensures this block is checked first.
+
+---
+
+## 8. User JWT vs. Internal Service Keys
+A common interview question is: *"Do your microservices use JWTs to talk to each other?"*
+
+**The Answer:** No. JWTs are for **Users**. Services use **Internal Keys** or **Trusted Network** communication.
+
+| Flow Type | Authentication Used | Why? |
+| :--- | :--- | :--- |
+| **Browser → Gateway** | **JWT Token** | To verify the specific user's identity. |
+| **Service A → Service B** | **Internal Key** | To verify that the caller is a trusted part of our backend. |
+
+### Real Examples from the code:
+1.  **User Service → Agent State Service:** Uses an `X-Internal-Key` header. We can't use a JWT here because when an admin is creating a new agent, that agent doesn't have a token yet!
+2.  **Telephony Service → Call Service:** Uses trusted network communication (passing only `X-Tenant-Id`). Since inbound phone calls are anonymous, there is no JWT to provide.
+
+**Security Implication:** This is exactly why the **Internal Block (Section 7)** is so important. Since internal APIs use simpler keys instead of complex JWTs, we must block them at the Gateway so they aren't exposed to the public internet.
+
+---
+
+## 9. The Lifecycle of a Request (Step-by-Step Trace)
+**Example:** A user attempts to login: `POST http://localhost:8080/api/v1/auth/login`
+
+1.  **Entry (Port 8080):** The browser hits the Gateway's port (defined in `server.port`). The internal Netty server picks up the raw request.
+2.  **CORS Check:** The Gateway checks the `globalcors` configuration. Since the path matches `[/**]`, it validates that the browser's origin (`localhost:4200`) is in the `allowedOrigins` list.
+3.  **Global Filter (The Bouncer):** The request enters the `filter()` method of `JwtAuthenticationFilter.java`. 
+    *   The filter checks the `OPEN_ENDPOINTS` list.
+    *   Since `/api/v1/auth/login` is marked as an open endpoint, it skips JWT validation and calls `chain.filter(exchange)`.
+4.  **Predicate Matching:** The Gateway compares the path against the `routes:` list in `application.yml`.
+    *   It finds a match in the `user-service` route because the path matches the `Path=/api/v1/auth/**` predicate.
+5.  **Proxying (Forwarding):** The Gateway looks up the destination `uri`: `http://localhost:8090`. It acts as a middleman and sends a new request to the User Service.
+6.  **Microservice Processing:** The User Service (running on port 8090) processes the login logic and returns a response (the JWT).
+7.  **Response Return:** The Gateway receives the response from the microservice, applies its `default-filters` (like `DedupeResponseHeader`), and delivers the final result back to the user's browser.
