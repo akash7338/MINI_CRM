@@ -1,4 +1,4 @@
-# Revision: CORS & API Gateway Routing
+# Gateway Deep Dive: Routing & Security
 
 This guide explains how the API Gateway handles browser security (CORS) and traffic routing.
 
