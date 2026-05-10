@@ -86,32 +86,20 @@ export class ApiService {
     if (status === 'COMPLETED') endpoint = 'complete';
     else if (status === 'REJECTED') endpoint = 'reject';
     
-    const options: any = this.getHeaders();
-    if (this.tenantId) {
-      options.headers = (options.headers as HttpHeaders).set('X-Tenant-Id', this.tenantId);
-    }
-    return this.http.post(`${this.GATEWAY_URL}/api/v1/calls/${callId}/${endpoint}`, {}, options);
+    return this.http.post(`${this.GATEWAY_URL}/api/v1/calls/${callId}/${endpoint}`, {}, this.getHeaders());
   }
 
   getCall(callId: string, tenantId: string): Observable<any> {
-    const options: any = this.getHeaders();
-    options.headers = (options.headers as HttpHeaders).set('X-Tenant-Id', tenantId);
-    return this.http.get(`${this.GATEWAY_URL}/api/v1/calls/${callId}`, options);
+    return this.http.get(`${this.GATEWAY_URL}/api/v1/calls/${callId}`, this.getHeaders());
   }
 
   // Analytics API
   getMetrics(tenantId: string): Observable<any> {
-    const options: any = this.getHeaders();
-    if (tenantId) {
-      options.headers = (options.headers as HttpHeaders).set('X-Tenant-Id', tenantId);
-    }
-    return this.http.get(`${this.GATEWAY_URL}/api/v1/analytics/${tenantId}/metrics`, options);
+    return this.http.get(`${this.GATEWAY_URL}/api/v1/analytics/${tenantId}/metrics`, this.getHeaders());
   }
 
   // Admin APIs
   createAgent(tenantId: string, agentData: any): Observable<any> {
-    const options: any = this.getHeaders();
-    options.headers = (options.headers as HttpHeaders).set('X-Tenant-Id', tenantId);
-    return this.http.post(`${this.GATEWAY_URL}/api/v1/users/agents`, agentData, options);
+    return this.http.post(`${this.GATEWAY_URL}/api/v1/users/agents`, agentData, this.getHeaders());
   }
 }

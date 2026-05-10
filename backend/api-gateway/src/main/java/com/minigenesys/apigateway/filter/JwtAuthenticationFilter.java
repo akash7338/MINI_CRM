@@ -81,15 +81,16 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
                     }
                 }
 
-                // Mutate the request to add headers
+                // Mutate the request to forcefully SET (overwrite) headers
                 ServerHttpRequest.Builder requestBuilder = exchange.getRequest().mutate()
-                        .header("X-Tenant-Id", tenantId)
-                        .header("X-User-Id", userId != null ? userId : "")
-                        .header("X-User-Role", role != null ? role : "");
-
-                if (agentId != null && !agentId.isBlank()) {
-                    requestBuilder.header("X-Agent-Id", agentId);
-                }
+                        .headers(headers -> {
+                            headers.set("X-Tenant-Id", tenantId);
+                            headers.set("X-User-Id", userId != null ? userId : "");
+                            headers.set("X-User-Role", role != null ? role : "");
+                            if (agentId != null && !agentId.isBlank()) {
+                                headers.set("X-Agent-Id", agentId);
+                            }
+                        });
 
                 ServerHttpRequest mutatedRequest = requestBuilder.build();
                 exchange = exchange.mutate().request(mutatedRequest).build();
