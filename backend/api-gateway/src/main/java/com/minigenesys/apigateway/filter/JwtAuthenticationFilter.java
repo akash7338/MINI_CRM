@@ -106,10 +106,11 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
     private Mono<Void> onError(ServerWebExchange exchange, String err, HttpStatus httpStatus) {
         log.error("Authentication failed: {}", err);
         exchange.getResponse().setStatusCode(httpStatus);
-        return exchange.getResponse().setComplete();
+        return exchange.getResponse().setComplete(); // The request dies here. No forward. No nothing.
     }
 
     private boolean isSecured(String path) {
+        // Checks if the path does NOT start with any of the open endpoints
         return OPEN_ENDPOINTS.stream().noneMatch(path::startsWith);
     }
 

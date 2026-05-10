@@ -125,13 +125,67 @@ A common interview question is: *"Do your microservices use JWTs to talk to each
 ## 9. The Lifecycle of a Request (Step-by-Step Trace)
 **Example:** A user attempts to login: `POST http://localhost:8080/api/v1/auth/login`
 
-1.  **Entry (Port 8080):** The browser hits the Gateway's port (defined in `server.port`). The internal Netty server picks up the raw request.
-2.  **CORS Check:** The Gateway checks the `globalcors` configuration. Since the path matches `[/**]`, it validates that the browser's origin (`localhost:4200`) is in the `allowedOrigins` list.
-3.  **Global Filter (The Bouncer):** The request enters the `filter()` method of `JwtAuthenticationFilter.java`. 
-    *   The filter checks the `OPEN_ENDPOINTS` list.
-    *   Since `/api/v1/auth/login` is marked as an open endpoint, it skips JWT validation and calls `chain.filter(exchange)`.
-4.  **Predicate Matching:** The Gateway compares the path against the `routes:` list in `application.yml`.
-    *   It finds a match in the `user-service` route because the path matches the `Path=/api/v1/auth/**` predicate.
-5.  **Proxying (Forwarding):** The Gateway looks up the destination `uri`: `http://localhost:8090`. It acts as a middleman and sends a new request to the User Service.
-6.  **Microservice Processing:** The User Service (running on port 8090) processes the login logic and returns a response (the JWT).
-7.  **Response Return:** The Gateway receives the response from the microservice, applies its `default-filters` (like `DedupeResponseHeader`), and delivers the final result back to the user's browser.
+1.  **Entry (Port 8080):** The browser hits the Gateway's port. The internal Netty server picks up the raw request.
+2.  **CORS Check:** The Gateway checks the `globalcors` configuration. It validates that the browser's origin (`localhost:4200`) is in the `allowedOrigins` list.
+3.  **Route Resolution (The Map Reading):** *Before any filters run*, the Gateway compares the path against the `routes:` list in `application.yml`. 
+    *   It finds a match in the `user-service` route (`Path=/api/v1/auth/**`).
+    *   It saves the destination URI (`http://localhost:8090`) as a hidden attribute on the request.
+4.  **Global Filter (The Bouncer):** The request enters the `filter()` method of `JwtAuthenticationFilter.java`. 
+    *   It checks the `OPEN_ENDPOINTS` list, sees `/auth/login` is open, skips JWT validation, and calls `chain.filter(exchange)`.
+5.  **The NettyRoutingFilter (The Delivery Truck):** The request reaches the very end of the filter chain. The built-in `NettyRoutingFilter` looks at the destination URI saved in Step 3, and physically sends a new HTTP request over the network to the User Service.
+6.  **Microservice Processing:** The User Service (on port 8090) processes the login logic and returns a response (the JWT).
+7.  **Response Return:** The Gateway receives the response, applies its `default-filters` (like `DedupeResponseHeader`), and delivers the final result back to the browser.
+
+---
+
+## 10. Deep Dive: JWT Security & Reactive Filters
+
+### A. Symmetric Key Encryption
+The API Gateway and the User Service use **Symmetric Key Encryption** (HMAC-SHA256). This means they both use the exact same `jwt.secret`.
+*   **User Service:** Uses the key to **Sign** the token (lock it).
+*   **Gateway:** Uses the same key to **Verify** the token (check the lock).
+
+### B. The 3 Parts of a JWT
+1.  **Header:** Metadata (`{"alg": "HS256"}`).
+2.  **Payload (Claims):** Your business data (`tenantId`, `role`, `agentId`).
+3.  **Signature:** A one-way hash (Digital Fingerprint) of the Header + Payload.
+*   **How Validation Works:** The Gateway doesn't just read the token. It takes the Header and Payload, re-runs the math using its own secret key, and compares its new hash against the token's Signature. If they match, the token hasn't been tampered with.
+
+### C. `userId` vs. `agentId`
+*   **`userId`:** The global authentication identity (Primary Key in `user-service`). Used for logging in.
+*   **`agentId`:** The operational/telephony role (Managed by `agent-state-service`). Used to route calls.
+*   *Why separate?* It allows you to delete a user's login access without losing the historical call data associated with their `agentId` seat.
+
+### D. Resource-Level Security & Short-Circuiting
+The Gateway prevents "Broken Object Level Authorization" by ensuring an Agent can only access their own data:
+```java
+if (path.startsWith("/api/v1/agents/") && agentId != null && !path.startsWith("/api/v1/agents/" + agentId)) {
+    return onError(exchange, "Access denied", HttpStatus.FORBIDDEN);
+}
+```
+*   **The Scope:** We first check `path.startsWith("/api/v1/agents/")` so we don't accidentally block agents from accessing generic endpoints (like `/telephony/make-call`).
+*   **Short-Circuiting (`&&`):** We check `agentId != null` *before* we append it to the string. This prevents Java from evaluating `!path.startsWith("/api/v1/agents/null")` and saves CPU cycles.
+
+### E. Reactive Mutability (`ServerHttpRequest`)
+Spring Cloud Gateway is built on **WebFlux (Reactive)**, meaning requests are **Immutable** (unchangeable) to prevent thread-safety issues.
+*   **The Problem:** We need to add `X-Tenant-Id` headers so microservices don't have to parse JWTs.
+*   **The Solution (`mutate()`):** We make a "photocopy" of the request using `request.mutate()`, add our headers, and seal it with `.build()`.
+*   **The Exchange Wrapper:** We then use the Decorator Pattern (`exchange.mutate().request(mutatedRequest).build()`). This creates an "Outer Box" around the original exchange. When the next filter asks for the request, the Outer Box intercepts it and hands over our new, modified request.
+
+---
+
+## 11. The Filter Chain (The Conveyor Belt)
+
+### A. Moving Down the Line (`chain.filter(exchange)`)
+When a filter is finished with its checks, it MUST call `return chain.filter(exchange);`.
+*   **What it means:** "My job is done, please pass this request to the next filter in the pipeline."
+*   **The NettyRoutingFilter (The Truck):** If there are no more custom filters left in the chain, the request hits a built-in Spring filter called `NettyRoutingFilter`. Its sole job is to look at the destination URL (calculated earlier from `application.yml`) and actually make the physical network request to the target microservice.
+*   **The Kill Switch:** If a filter wants to block a request (like an invalid JWT), it simply returns an error response (e.g., `exchange.getResponse().setComplete()`) and **does not** call `chain.filter()`. This pulls the request off the conveyor belt immediately, and it never reaches the `NettyRoutingFilter`.
+
+### B. Filter Priority (`implements Ordered`)
+Because a Gateway might have multiple Global Filters (Logging, Auth, Routing), it needs to know what order to execute them in.
+*   **The Interface:** By adding `implements Ordered`, Spring forces you to provide a `getOrder()` method.
+*   **The Value:** The integer returned determines the position on the conveyor belt.
+    *   **Lowest Numbers (e.g., -1, 0):** Run **FIRST**.
+    *   **Highest Numbers (e.g., 100):** Run **LAST**.
+*   **Why Auth is First:** `JwtAuthenticationFilter` is usually given a very low order number so it acts as the "Bouncer at the front door." If a token is invalid, the request is dropped immediately, saving CPU cycles from unnecessary logging or routing attempts.
