@@ -43,16 +43,21 @@ There is no REST controller that external clients can call.
 ## 5. Kafka Usage
 
 ### Consumes ← `call-events`
-- **Consumer:** `KafkaMessaging` (group: `routing-service-group`)
-- **Logic:** Deserializes `CallRequest`, calls `routingEngine.assignAgent()`, publishes result
-- **If NO_AGENT:** Enqueues the call in Redis via `QueueManager.enqueue()`
+- **Consumer:** `KafkaMessaging.consumeCallEvent()` (group: `routing-service-group`)
+- **Calls:** `routingService.processRouting(request)` → `routingEngine.assignAgent(request)`
+- **If `NO_AGENT`:** calls `queueManager.enqueue(request)` and logs call ID
+- **On exception:** rethrows as `RuntimeException` to trigger Kafka DLQ
 
 ### Produces → `routing-events`
+**Method:** `KafkaMessaging.produceRoutingEvent(AssignmentResult result)`
+- Serializes `AssignmentResult` to JSON
+- `kafkaTemplate.send(ROUTING_EVENTS_TOPIC, result.getTenantId(), message).get()` — **blocking call** to ensure publish success before releasing lock
+
 | Status | When | Consumers |
 |---|---|---|
 | `ASSIGNED` | Agent found and claimed | agent-state-service, call-service, telephony-service, websocket-gateway, analytics, audit |
 | `NO_AGENT` | No available agent matches skills | call-service (updates call to QUEUED), analytics |
-| `ABANDONED` | Max retries (10) exceeded | call-service (updates call to FAILED), analytics, audit |
+| `ABANDONED` | Max retries (10) exceeded | call-service (updates call to ABANDONED + optionally frees agent), analytics, audit |
 
 ---
 
@@ -219,3 +224,76 @@ This entire script executes atomically on Redis — no other command can interle
 2. **Priority scoring formula** — `(-priority * 10^13) + timestamp` ensures higher priority calls are always dequeued first, with FIFO ordering within the same priority
 3. **The distributed lock uses a Lua-based CAS delete** — `if redis.call('get', KEYS[1]) == ARGV[1] then del` — to prevent accidentally deleting another thread's lock
 4. **The idempotency cache exists because Kafka delivers "at least once"** — duplicate messages would cause duplicate assignments without it
+
+---
+
+## 12. Annotated Flow Trace (Exact Methods)
+
+### Primary Path: Call Arrives
+```
+Kafka: call-events message (JSON CallRequest)
+→ KafkaMessaging.consumeCallEvent(String message)
+    → objectMapper.readValue(message, CallRequest.class)
+    → routingService.processRouting(request)
+        → routingEngine.assignAgent(request)  ← ALL THE WORK HAPPENS HERE
+    → KafkaMessaging.produceRoutingEvent(result)
+        → kafkaTemplate.send("routing-events", tenantId, json).get()  [blocking]
+    → if result.status == "NO_AGENT":
+        queueManager.enqueue(request)  ← Redis retry queue
+    → on exception: throw RuntimeException  → Kafka DLQ
+```
+
+### Inside `RoutingEngine.assignAgent(CallRequest call)`
+```
+Step 1: Acquire distributed lock
+  lockKey = "routing:lock:call:" + callId
+  lockToken = UUID.randomUUID().toString()
+  redisTemplate.opsForValue().setIfAbsent(lockKey, lockToken, 10, SECONDS)
+  if NOT acquired: return AssignmentResult.failure(callId, tenantId, "LOCKED", ...)
+
+Step 2: Idempotency check
+  cachedAgentId = redisTemplate.opsForValue().get("routing:assignment:call:" + callId)
+  if cachedAgentId != null:
+    agentStateKey = "tenant:%s:agent:%s:state" % (tenantId, cachedAgentId)
+    currentStatus = redisTemplate.opsForHash().get(agentStateKey, "status")
+    if currentStatus in ["BUSY", "AVAILABLE"]:
+      return AssignmentResult.success(callId, tenantId, cachedAgentId)  ← cache hit
+    else:  ← THE BUG FIX: agent is offline, don't trust the cache
+      log.warn("agent offline, clearing idempotency cache")
+      redisTemplate.delete("routing:assignment:call:" + callId)
+
+Step 3: Execute Lua script (atomically)
+  skillKeys = request.requiredSkills.map(s → "tenant:X:skill:" + s + ":available")
+  selectedAgentId = redisTemplate.execute(
+    new DefaultRedisScript(SELECT_AGENT_LUA, String.class),
+    skillKeys,                               // KEYS[]
+    tenantId, AGENT_STATE_KEY_TPL, now, uuid // ARGV[]
+  )
+
+  Lua script (runs atomically on Redis):
+    ZINTERSTORE tempSet [skill1Set, skill2Set, ...]  → agents with ALL required skills
+    agent = ZRANGE tempSet 0 0  → pick lowest score (least recently assigned)
+    DEL tempSet
+    if agent found:
+      for each skillKey: ZREM skillKey agent   → remove from ALL skill pools
+      HSET stateKey 'status' 'BUSY' 'lastAssignedTime' now   → mark BUSY
+      return agent
+    return nil
+
+Step 4 (if agent found): Save and cache
+  RoutingEngine.saveAssignment(call, selectedAgentId):
+    assignmentRepository.findByCallId(callId) orCreate  [PG SELECT/INSERT]
+    assignment.setAgentId(selectedAgentId)
+    assignmentRepository.save()  [PG UPSERT: assignments table]
+    redisTemplate.opsForValue().set(
+        "routing:assignment:call:" + callId, selectedAgentId, 1, HOURS)
+  return AssignmentResult.success(callId, tenantId, selectedAgentId)
+
+Step 4 (if no agent): Return failure
+  return AssignmentResult.failure(callId, tenantId, "NO_AGENT", "No available agent matches skills")
+
+Finally (always): Release lock using CAS Lua
+  Lua: if redis.call('get', lockKey) == lockToken then redis.call('del', lockKey) end
+  (CAS delete prevents accidentally deleting a different thread's lock)
+```
+

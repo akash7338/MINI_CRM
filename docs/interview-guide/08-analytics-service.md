@@ -57,19 +57,28 @@ The analytics service runs **passively in the background** at all times. It neve
 
 ## 5. Kafka Usage
 
-### Consumes ← 4 Topics
+### Consumes ← 4 Topics (single method, `@Header` injection)
+
+**Consumer class:** `AnalyticsEventConsumer.consume(String message, @Header(KafkaHeaders.RECEIVED_TOPIC) String topic)`
+**Group:** `analytics-service-group`
 
 | Topic | Event | Counter Action |
 |---|---|---|
-| `call-events` | New call (`isNew: true`) | `totalCalls++`, `queuedCalls++` |
-| `call-events` | Requeued call (`isNew: false`) | `queuedCalls++` only (no double-count on totalCalls) |
-| `routing-events` | `ASSIGNED` | `routedCalls++`, `queuedCalls--` |
-| `routing-events` | `NO_AGENT` | `noAgentEvents++` |
-| `routing-events` | `ABANDONED` | `abandonedCalls++`, `queuedCalls--` |
-| `agent-events` | Any state change | `updateAgentCounts(tenant, previousStatus, newStatus)` |
-| `call-lifecycle-events` | `CALL_COMPLETED` | `completedCalls++` |
+| `call-events` | New call (`newCall: true` or field absent) | `incrementTotalCalls()` + `incrementQueuedCalls()` |
+| `call-events` | Requeued call (`newCall: false`) | `incrementQueuedCalls()` only (no double-count on total) |
+| `routing-events` | `ASSIGNED` | `incrementRoutedCalls()` + `decrementQueuedCalls()` |
+| `routing-events` | `NO_AGENT` | `incrementNoAgentEvents()` |
+| `routing-events` | `ABANDONED` | `incrementAbandonedCalls()` + `decrementQueuedCalls()` |
+| `agent-events` | Any state change | `updateAgentCounts(tenantId, previousStatus, newStatus)` |
+| `call-lifecycle-events` | `CALL_COMPLETED` | `incrementCompletedCalls()` |
 
-**Consumer Group:** `analytics-service-group`
+**Important:** The field name in `call-events` is `newCall` (not `isNew`). The check is:
+```java
+boolean isNew = !node.has("newCall") || node.get("newCall").asBoolean();
+```
+So: missing field = treated as new call (safe default). `newCall: false` = requeued, skip totalCalls.
+
+If `tenantId == null` in the event JSON — **the entire event is silently dropped** (`if (tenantId == null) return;`).
 
 ### Does NOT Produce
 The analytics service is a pure consumer — it never publishes events to any Kafka topic.
@@ -155,4 +164,72 @@ The analytics service is **completely isolated** — it never calls any other se
 
 ## 11. Interview Explanation
 
-> "The analytics service is a passive event aggregator. It consumes from four Kafka topics — call-events, routing-events, agent-events, and call-lifecycle-events — and maintains a single metrics row per tenant in PostgreSQL. For example, when a call-event arrives with `isNew: true`, it increments totalCalls and queuedCalls. When a routing-event with ASSIGNED arrives, it increments routedCalls and decrements queuedCalls. The dashboard polls this service to show real-time counters. I used `@Version` optimistic locking to handle concurrent updates from multiple Kafka consumer threads without deadlocks. The trade-off is that counters can drift if events arrive out of order or are duplicated, but for a dashboard showing approximate real-time metrics, this is acceptable."
+> "The analytics service is a passive event aggregator. It consumes from four Kafka topics — call-events, routing-events, agent-events, and call-lifecycle-events — and maintains a single metrics row per tenant in PostgreSQL. For example, when a call-event arrives with `newCall` absent or true, it increments totalCalls and queuedCalls. When a routing-event with ASSIGNED arrives, it increments routedCalls and decrements queuedCalls. The dashboard polls this service to show real-time counters. I used `@Version` optimistic locking to handle concurrent updates from multiple Kafka consumer threads without deadlocks. The trade-off is that counters can drift if events arrive out of order or are duplicated, but for a dashboard showing approximate real-time metrics, this is acceptable."
+
+---
+
+## 12. Annotated Flow Traces (Exact Methods)
+
+### `AnalyticsEventConsumer.consume()` dispatch
+```
+Kafka message arrives on any of the 4 topics:
+→ AnalyticsEventConsumer.consume(message, topic)
+    → node = objectMapper.readTree(message)
+    → tenantId = node.get("tenantId").asText()  or null
+    → if tenantId == null: return  ← silent drop
+    → switch(topic):
+        "call-events"      → handleCallEvent(tenantId, node)
+        "routing-events"   → handleRoutingEvent(tenantId, node)
+        "agent-events"     → handleAgentEvent(tenantId, node)
+        "call-lifecycle-events" → handleLifecycleEvent(tenantId, node)
+```
+
+### `handleCallEvent()` internal
+```java
+boolean isNew = !node.has("newCall") || node.get("newCall").asBoolean();
+if (isNew) analyticsService.incrementTotalCalls(tenantId);
+analyticsService.incrementQueuedCalls(tenantId);  // always increments queued
+```
+
+### `handleRoutingEvent()` internal
+```java
+String status = node.get("status").asText();
+if ("ASSIGNED")   → incrementRoutedCalls() + decrementQueuedCalls()
+if ("NO_AGENT")   → incrementNoAgentEvents()
+if ("ABANDONED")  → incrementAbandonedCalls() + decrementQueuedCalls()
+```
+
+### `handleAgentEvent()` internal
+```java
+String oldStatus = node.get("previousStatus").asText();  // from AgentEvent.previousStatus
+String newStatus = node.get("newStatus").asText();
+analyticsService.updateAgentCounts(tenantId, oldStatus, newStatus);
+// Inside updateAgentCounts:
+//   Math.max(0, oldBucket - 1)  ← prevents negative counts
+//   newBucket + 1
+```
+
+### `updateMetric()` — the core write method
+Every counter update goes through this:
+```java
+private void updateMetric(String tenantId, Consumer<TenantMetrics> updater) {
+    TenantMetrics metrics = repository.findById(tenantId)
+        .orElse(TenantMetrics.builder()  // create row with all zeros if first event
+            .tenantId(tenantId).totalCalls(0L)...
+            .build());
+    updater.accept(metrics);          // apply the lambda (e.g., m -> m.setTotalCalls(m.getTotalCalls() + 1))
+    metrics.setUpdatedAt(Instant.now());
+    repository.save(metrics);         // PG UPDATE with @Version optimistic lock check
+}
+// If @Version conflict: Spring throws OptimisticLockException -> transaction retried
+```
+
+### Additional methods not in main table
+- **`updateWaitTime(tenantId, waitTimeMs)`** — maintains rolling average:
+  ```java
+  totalWaitTime = averageWaitTimeMs * waitTimeCount;
+  waitTimeCount++;
+  averageWaitTimeMs = (totalWaitTime + waitTimeMs) / waitTimeCount;
+  ```
+- **`setAgentCounts(tenantId, active, busy, offline)`** — absolute setter (not delta). Used for reconciliation if counts drift.
+

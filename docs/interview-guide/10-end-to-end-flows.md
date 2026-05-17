@@ -591,3 +591,139 @@ Kafka                    Audit Service (KafkaAuditConsumer)         PostgreSQL
     │   • Cross-service state sync              │
     └──────────────────────────────────────────┘
 ```
+
+---
+
+## 11. Parallel Fan-Out: What Every Service Does for One Event
+
+> **This is the most important section for interviews.** It shows exactly what happens in EVERY service simultaneously when a single `routing-events` message with status `ASSIGNED` is published.
+
+**Trigger:** `RoutingEngine.assignAgent()` finds agent `AG_001` for call `abc-123` in tenant `tenant1`. It calls `KafkaMessaging.produceRoutingEvent()`.
+
+**Published message:**
+```json
+{
+  "callId": "abc-123",
+  "tenantId": "tenant1",
+  "agentId": "AG_001",
+  "status": "ASSIGNED"
+}
+```
+Topic: `routing-events`, partition key: `"tenant1"`
+
+**All of the following happen CONCURRENTLY (each consumer group gets its own copy):**
+
+---
+
+### Consumer 1: `agent-state-service` (group: `agent-state-service-group`)
+**Handler:** `RoutingEventConsumer` → `AgentStateService.handleRoutingEvent(event)`
+```
+→ event.status == "ASSIGNED" ✅, event.agentId != null ✅ → proceed
+→ agentRepository.findByIdAndTenantId("AG_001", "tenant1")  [PG SELECT: agents]
+→ agent.status == AVAILABLE (not OFFLINE) → proceed (ping-pong fix)
+→ agent.setStatus(BUSY)
+→ agent.setActiveCallId("abc-123")
+→ agent.setLastAssignedTime(now())
+→ agentRepository.save(agent)  [PG UPDATE: agents SET status=BUSY, active_call_id=abc-123]
+→ updateRedisState(agent, AVAILABLE, BUSY)
+    opsForHash().put("tenant:tenant1:agent:AG_001:state", "status", "BUSY")
+    opsForHash().put("tenant:tenant1:agent:AG_001:state", "lastAssignedTime", now)
+    for skill in agent.skills:
+      opsForZSet().remove("tenant:tenant1:skill:sales:available", "AG_001")
+→ publishEvent(agent, AVAILABLE, BUSY, "AGENT_BUSY")
+    → kafkaTemplate.send("agent-events", "tenant1", AgentEvent{AGENT_BUSY, AG_001, ...})
+```
+**Net state change:** PG: `agents.status = BUSY`. Redis: state hash updated, agent removed from skill sets. Kafka: `agent-events` AGENT_BUSY published.
+
+---
+
+### Consumer 2: `call-service` (group: `call-service-group`)
+**Handler:** `RoutingEventConsumer` → `CallService.handleRoutingEvent(event)`
+```
+→ callRepository.findById("abc-123")  [PG SELECT: calls]
+→ tenant safety check: event.tenantId == call.tenantId ✅
+→ status == "ASSIGNED"
+→ call.setStatus(ROUTED)
+→ call.setAssignedAgentId("AG_001")
+→ call.setRoutingFailureReason(null)
+→ callRepository.save(call)  [PG UPDATE: calls SET status=ROUTED, assigned_agent_id=AG_001]
+```
+**Net state change:** PG: `calls.status = ROUTED`. No Kafka publish. No Redis.
+
+---
+
+### Consumer 3: `telephony-service` (group: `telephony-service-group`)
+**Handler:** `RoutingEventConsumer` → `TelephonyService.handleAssignment(event)`
+```
+→ event.status == "ASSIGNED" ✅ → proceed
+→ repository.findByInternalCallId("abc-123")  [PG SELECT: telephony_call_sessions]
+→ if session.assignedAgentId == null (first time):
+    session.setAssignedAgentId("AG_001")
+    repository.save(session)  [PG UPDATE: telephony_call_sessions SET assigned_agent_id=AG_001]
+→ (if no session found: throw RuntimeException → Kafka retry)
+```
+**Net state change:** PG: `telephony_call_sessions.assigned_agent_id = AG_001`. Next `/bridge` poll returns `<Dial><Client>AG_001</Client></Dial>`.
+
+---
+
+### Consumer 4: `websocket-gateway` (group: `websocket-gateway-group`)
+**Handler:** `KafkaEventConsumer.consume(message, topic="routing-events")`
+```
+→ node = objectMapper.readTree(message)
+→ tenantId = "tenant1"
+→ event = RealtimeEvent { topic: "routing-events", payload: node, receivedAt: now }
+→ messagingTemplate.convertAndSend("/topic/events/tenant1", event)
+    → SimpleBroker fans out to all WebSocket subscribers for tenant1
+    → AG_001's browser receives: { topic: "routing-events", payload: { status: "ASSIGNED", agentId: "AG_001", ... } }
+    → Angular SessionStateService.handleEvent():
+        status == "ASSIGNED" && agentId == myAgentId → show call panel, set status "On Call"
+```
+**Net state change:** Browser UI updated. No DB. No Redis.
+
+---
+
+### Consumer 5: `analytics-service` (group: `analytics-service-group`)
+**Handler:** `AnalyticsEventConsumer.consume(message, topic="routing-events")`
+```
+→ tenantId = "tenant1"
+→ handleRoutingEvent("tenant1", node)
+→ status == "ASSIGNED"
+→ analyticsService.incrementRoutedCalls("tenant1")
+    → updateMetric("tenant1", m -> m.setRoutedCalls(m.getRoutedCalls() + 1))
+    → [PG UPDATE: tenant_metrics SET routed_calls = routed_calls + 1 WHERE tenant_id = 'tenant1']
+→ analyticsService.decrementQueuedCalls("tenant1")
+    → updateMetric("tenant1", m -> m.setQueuedCalls(Math.max(0, m.getQueuedCalls() - 1)))
+    → [PG UPDATE: tenant_metrics SET queued_calls = queued_calls - 1 WHERE tenant_id = 'tenant1']
+```
+**Net state change:** PG: `tenant_metrics.routed_calls++`, `queued_calls--`.
+
+---
+
+### Consumer 6: `audit-service` (group: `audit-service-group`)
+**Handler:** `KafkaAuditConsumer.consume(message, topic="routing-events")` [@Transactional]
+```
+→ node = objectMapper.readTree(message)
+→ tenantId = "tenant1"
+→ eventType = "ASSIGNED"  (no "eventType" field → fallback to... wait, routing-events have "status" not "eventType")
+         Actually: node.has("eventType") = false → eventType = topic = "routing-events"
+→ node.has("callId") = true → entityType = "CALL", entityId = "abc-123"
+→ sourceService = getSourceService("routing-events") = "routing-service"
+→ AuditEvent { tenantId, eventType="routing-events", sourceService="routing-service",
+               entityType="CALL", entityId="abc-123", payloadJson=<full JSON> }
+→ auditRepository.save(event)  [PG INSERT: audit_events]
+```
+**Net state change:** PG: new row in `audit_events` for this ASSIGNED event.
+
+---
+
+### Summary Table: One ASSIGNED Event, Six Consumers
+
+| Service | Method | DB Write | Redis Write | Kafka Out |
+|---|---|---|---|---|
+| agent-state-service | `AgentStateService.handleRoutingEvent()` | `agents`: status=BUSY | state hash + skill ZREM | `agent-events` AGENT_BUSY |
+| call-service | `CallService.handleRoutingEvent()` | `calls`: status=ROUTED | none | none |
+| telephony-service | `TelephonyService.handleAssignment()` | `telephony_call_sessions`: assigned_agent_id | none | none |
+| websocket-gateway | `KafkaEventConsumer.consume()` | none | none | none (WebSocket push) |
+| analytics-service | `AnalyticsEventConsumer.consume()` | `tenant_metrics`: routedCalls++, queuedCalls-- | none | none |
+| audit-service | `KafkaAuditConsumer.consume()` | `audit_events`: INSERT | none | none |
+

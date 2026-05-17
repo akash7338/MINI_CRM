@@ -173,3 +173,133 @@ The `/internal` endpoint is protected by a shared secret (`X-Internal-Key` heade
 ## 11. Interview Explanation
 
 > "The agent-state-service is the real-time availability engine for the contact center. It maintains a dual-write architecture — every agent state change is written to both Redis (for sub-millisecond routing lookups) and PostgreSQL (for durability and audit). Redis stores agent states as hashes and maintains sorted sets per skill where the score is the agent's last-assigned time, enabling LRU-based fair scheduling. The service runs a heartbeat-based disconnect detector every 10 seconds — if an agent's browser hasn't sent a ping in 30 seconds, the system assumes they crashed and automatically marks them offline, triggering call recovery. I also debugged and fixed a critical ping-pong loop where the heartbeat timeout would cascade into an infinite assign-disconnect-requeue cycle because the routing service's idempotency cache blindly re-assigned calls to offline agents."
+
+---
+
+## 12. Annotated Flow Traces (Exact Methods)
+
+Key constants in `AgentStateService`:
+```java
+AGENT_STATE_KEY_TPL = "tenant:%s:agent:%s:state"        // Hash
+SKILL_KEY_TPL       = "tenant:%s:skill:%s:available"    // Sorted Set
+HEARTBEAT_KEY_TPL  = "tenant:%s:agent:%s:heartbeat"    // String
+HEARTBEAT_TIMEOUT_MS = 30000
+```
+
+### Entry 1: Agent Login / Available / Logout / Busy
+**Controller:** `AgentStateController.login()` / `available()` / `logout()` / `busy()`
+**All call:** `AgentStateService.changeState(tenantId, agentId, newStatus)`
+
+```
+changeState(tenantId, agentId, AVAILABLE):
+  → agentRepository.findByIdAndTenantId(agentId, tenantId)  [PG SELECT]
+  → isValidTransition(oldStatus, AVAILABLE)?  [truth table below]
+      if false → throw 409 CONFLICT
+  → agent.setStatus(AVAILABLE)
+  → agentRepository.save(agent)  [PG UPDATE]
+  → updateRedisState(agent, oldStatus, AVAILABLE)
+      opsForHash().put(stateKey, "status", "AVAILABLE")
+      opsForHash().put(stateKey, "lastAssignedTime", ...)
+      for each skill:
+        opsForZSet().add("tenant:X:skill:sales:available", agentId, score)
+  → publishEvent(agent, oldStatus, AVAILABLE, "AGENT_AVAILABLE")
+      AgentEventProducer.publishAgentEvent(AgentEvent)
+      → kafkaTemplate.send("agent-events", tenantId, message)
+```
+
+**`isValidTransition()` truth table (from source code lines 218-232):**
+
+| From | To | Result |
+|---|---|---|
+| OFFLINE | AVAILABLE | ✅ allowed |
+| AVAILABLE | BUSY | ✅ allowed |
+| BUSY | AVAILABLE | ✅ allowed |
+| AVAILABLE | OFFLINE | ✅ allowed |
+| BUSY | OFFLINE | ✅ allowed (forced disconnect) |
+| OFFLINE | BUSY | ❌ blocked |
+| same | same | ❌ blocked |
+
+### Entry 2: Heartbeat
+**Controller:** `AgentStateController.heartbeat()`
+**Calls:** `AgentStateService.handleHeartbeat(tenantId, agentId)`
+
+```
+handleHeartbeat(tenantId, agentId):
+  → agentRepository.findByIdAndTenantId(agentId, tenantId)  [PG SELECT]
+  → if agent.status == OFFLINE → throw 409 CONFLICT
+  → agent.setLastHeartbeatAt(Instant.now().toEpochMilli())
+  → agentRepository.save(agent)  [PG UPDATE: last_heartbeat_at]
+  → heartbeatKey = "tenant:%s:agent:%s:heartbeat"
+  → redisTemplate.opsForValue().set(heartbeatKey, epochMs, 30000, MILLISECONDS)
+    (resets the 30-second countdown every call)
+```
+
+### Entry 3: Disconnect Detection (Scheduled)
+**Method:** `AgentStateService.detectDisconnects()` — `@Scheduled(fixedRateString="${agent.heartbeat.scan-interval:10000}")`
+
+```
+detectDisconnects() [runs every 10s]:
+  → threshold = now() - 30000ms
+  → agentRepository.findByStatusInAndLastHeartbeatAtBefore([AVAILABLE,BUSY], threshold)
+     [PG: SELECT * FROM agents WHERE status IN ('AVAILABLE','BUSY') AND last_heartbeat_at < threshold]
+  → agentRepository.findByStatusInAndLastHeartbeatAtIsNull([AVAILABLE,BUSY])
+     [catches agents that never sent a heartbeat]
+  → for each expired agent:
+      agent.setStatus(OFFLINE)
+      agent.setActiveCallId(null)
+      agentRepository.save(agent)  [PG UPDATE]
+      updateRedisState(agent, oldStatus, OFFLINE)
+        opsForHash().put(stateKey, "status", "OFFLINE")
+        for each skill: opsForZSet().remove(skillKey, agentId)
+        redisTemplate.delete(stateKey)  ← destroys the hash entirely
+      publishEvent(agent, oldStatus, OFFLINE, "AGENT_DISCONNECTED")
+        → Kafka: agent-events
+          → AgentEventConsumer (call-service):
+              CallService.handleAgentDisconnect()  ← requeues orphaned calls
+          → KafkaEventConsumer (websocket-gateway): pushes to browser
+      redisTemplate.delete(heartbeatKey)  ← explicit cleanup
+```
+
+### Entry 4: Kafka Consumer — `routing-events`
+**Consumer class:** `RoutingEventConsumer` (group: `agent-state-service-group`)
+**Calls:** `AgentStateService.handleRoutingEvent(RoutingEvent event)`
+
+```
+handleRoutingEvent(event):
+  → if event.status != "ASSIGNED" or event.agentId == null → return (skip)
+  → agentRepository.findByIdAndTenantId(event.agentId, event.tenantId)  [PG SELECT]
+  → if agent not found → log warn, return
+  → if agent.status == OFFLINE:
+      log.warn("Ignoring routing event... Breaking the ping-pong loop.")
+      return  ← THE CRITICAL BUG FIX
+  → agent.setStatus(BUSY)
+  → agent.setActiveCallId(event.callId)
+  → agent.setLastAssignedTime(now())
+  → agentRepository.save(agent)  [PG UPDATE]
+  → updateRedisState(agent, AVAILABLE, BUSY)
+      opsForHash().put(stateKey, "status", "BUSY")
+      opsForHash().put(stateKey, "lastAssignedTime", now)
+      for each skill: opsForZSet().remove(skillKey, agentId)
+  → publishEvent(agent, AVAILABLE, BUSY, "AGENT_BUSY")
+      → Kafka: agent-events → websocket-gateway → browser shows "On Call"
+```
+
+### Entry 5: Kafka Consumer — `call-lifecycle-events`
+**Consumer class:** `CallLifecycleConsumer` (group: `agent-state-service-group`)
+**Calls:** `AgentStateService.handleCallCompletion(CallLifecycleEvent event)`
+
+```
+handleCallCompletion(event):
+  → agentRepository.findByIdAndTenantId(event.agentId, event.tenantId)  [PG SELECT]
+  → if not found → log warn, return
+  → agent.setStatus(AVAILABLE)
+  → agent.setActiveCallId(null)
+  → agentRepository.save(agent)  [PG UPDATE]
+  → updateRedisState(agent, BUSY, AVAILABLE)
+      opsForHash().put(stateKey, "status", "AVAILABLE")
+      for each skill: opsForZSet().add(skillKey, agentId, newScore)
+        ← agent re-enters routing pool with fresh score (goes to back of queue)
+  → publishEvent(agent, BUSY, AVAILABLE, "AGENT_AVAILABLE")
+      → Kafka: agent-events → websocket-gateway → browser shows "Ready"
+```
+

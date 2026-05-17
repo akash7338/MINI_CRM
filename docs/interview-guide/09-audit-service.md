@@ -56,7 +56,11 @@ Returns the last 50 audit events related to agent AG_001.
 
 ## 5. Kafka Usage
 
-### Consumes ← 5 Topics
+### Consumes ← 5 Topics (single method, `@Header` injection)
+
+**Consumer class:** `KafkaAuditConsumer.consume(String message, @Header(KafkaHeaders.RECEIVED_TOPIC) String topic)`
+**Group:** `audit-service-group`
+**Annotation:** `@Transactional` — every consume() call is a DB transaction, so a failed INSERT rolls back cleanly
 
 | Topic | Source Service | Entity Type Extracted |
 |---|---|---|
@@ -66,21 +70,27 @@ Returns the last 50 audit events related to agent AG_001.
 | `call-lifecycle-events` | call-service | CALL (via `callId` field) |
 | `user-events` | user-service | USER (via `userId` field) |
 
-**Consumer Group:** `audit-service-group`
-
-### Entity Extraction Logic
+**`eventType` extraction (from source):**
 ```java
-if (node.has("callId"))      → entityType = "CALL",  entityId = callId
+String eventType = node != null && node.has("eventType") ? node.get("eventType").asText() : topic;
+```
+If the event has no `eventType` field, the **topic name itself** is used as the event type. This means call-events without an explicit eventType are recorded as `"call-events"` — not null.
+
+**Entity extraction priority (from source):**
+```java
+if (node.has("callId"))       → entityType = "CALL",  entityId = callId
 else if (node.has("agentId")) → entityType = "AGENT", entityId = agentId
 else if (node.has("userId"))  → entityType = "USER",  entityId = userId
+// else: both null
 ```
 
-### Source Service Mapping
+**Source service mapping (from `getSourceService()`):**
 ```java
 "call-events" / "call-lifecycle-events" → "call-service"
 "routing-events"                        → "routing-service"
 "agent-events"                          → "agent-state-service"
 "user-events"                           → "user-service"
+default                                 → "unknown"
 ```
 
 ### Does NOT Produce
@@ -157,3 +167,65 @@ Like the analytics service, the audit service is **completely isolated** — it 
 ## 11. Interview Explanation
 
 > "The audit service is the immutable event log for the entire platform. It consumes from all five Kafka topics — call-events, routing-events, agent-events, call-lifecycle-events, and user-events — and persists every single message as a structured audit record in PostgreSQL. Each record includes metadata I extract from the JSON: tenant ID, entity type (CALL/AGENT/USER), entity ID, event type, and source service, plus the complete raw JSON payload for forensic analysis. Records are append-only — never updated or deleted. The query API supports filtering by tenant, entity, and event type, which is useful for debugging production issues like the ghost call re-assignment bug we investigated, where the audit trail clearly showed the ASSIGNED → DISCONNECTED → ASSIGNED cycle repeating every 10 seconds."
+
+---
+
+## 12. Annotated Flow Traces (Exact Methods)
+
+### `KafkaAuditConsumer.consume()` — full trace
+```
+Kafka message arrives on any of 5 topics:
+→ KafkaAuditConsumer.consume(message, topic)  [@Transactional]
+
+  Step 1: Parse JSON (with fault tolerance)
+    try:
+      node = objectMapper.readTree(message)
+    catch Exception:
+      log.warn("Invalid JSON... Saving raw payload.")
+      node = null  ← saves record anyway with null metadata
+
+  Step 2: Extract metadata
+    tenantId  = node?.get("tenantId").asText()        or null
+    eventType = node?.get("eventType").asText()        or topic  ← fallback to topic name!
+    entityId/entityType = first match of callId/agentId/userId    or null
+
+  Step 3: Determine source service
+    getSourceService(topic) → "call-service" / "routing-service" / "agent-state-service" / etc.
+
+  Step 4: Build and save
+    AuditEvent event = AuditEvent.builder()
+        .tenantId(tenantId)          // null if missing
+        .eventType(eventType)        // topic name if no eventType field
+        .sourceService(sourceService)
+        .entityType(entityType)      // CALL / AGENT / USER / null
+        .entityId(entityId)          // actual ID / null
+        .payloadJson(message)        // FULL raw string, always
+        .build()
+    auditRepository.save(event)  [PG INSERT: audit_events]
+
+  If INSERT fails: @Transactional rolls back → Kafka does NOT commit offset → message retried
+```
+
+### Example: AGENT_DISCONNECTED event through audit
+```
+Kafka: agent-events
+{
+  "eventType": "AGENT_DISCONNECTED",
+  "agentId": "AG_001",
+  "tenantId": "tenant1",
+  "previousStatus": "BUSY",
+  "newStatus": "OFFLINE",
+  "callId": "abc-123",
+  "timestamp": "..."
+}
+
+→ tenantId  = "tenant1"
+→ eventType = "AGENT_DISCONNECTED"  (has eventType field)
+→ entityType = "CALL", entityId = "abc-123"  (callId takes priority over agentId)
+→ sourceService = "agent-state-service"
+→ payloadJson = full JSON string above
+→ INSERT into audit_events  [PG]
+```
+
+> **Note:** Because `callId` is checked before `agentId`, an AGENT_DISCONNECTED event that includes a `callId` will be recorded with `entityType=CALL`, not `entityType=AGENT`. This is a subtle parsing behavior worth remembering.
+

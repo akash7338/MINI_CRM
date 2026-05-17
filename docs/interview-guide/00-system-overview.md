@@ -92,23 +92,22 @@ Think of it as a simplified version of Genesys Cloud or Amazon Connect — the s
 Used for request-response flows where the caller needs an immediate answer.
 
 | Caller | Callee | Why |
-| Caller                            | Callee           | Why                                             |
-|-----------------------------------|------------------|-------------------------------------------------|
-| Browser → API Gateway             | All services     | All external traffic goes through the gateway   |
-| Telephony Service → Call Service  | Create/start call| Twilio callbacks need immediate state updates   |
+|---|---|---|
+| Browser → API Gateway | All services | All external traffic goes through the gateway |
+| User Service → Agent State Service | `POST /api/v1/agents/internal` | During agent creation, user-service provisions the agent profile via REST+X-Internal-Key |
+| Telephony Service → Call Service | Create/start call | Twilio callbacks need immediate state updates |
 
 ### 2. Asynchronous (Kafka)
 
 Used for event-driven communication where services react to state changes without blocking.
 
-| Producer | Topic | Consumers |
-| Producer             | Topic                  | Consumers                                                        |
-|----------------------|------------------------|------------------------------------------------------------------|
-| Call Service         | `call-events`          | Routing Service, WebSocket Gateway, Analytics, Audit             |
-| Agent State Service  | `agent-events`         | Call Service (recovery), WebSocket Gateway, Analytics, Audit     |
-| Routing Service      | `routing-events`       | Agent State Service, Call Service, Telephony Service, WS Gateway |
-| Call Service         | `call-lifecycle-events`| Agent State Service, WebSocket Gateway, Analytics, Audit         |
-| User Service         | `user-events`          | Audit Service                                                    |
+| Producer Class | Service | Topic | Consumer Classes | Consumer Services |
+|---|---|---|---|---|
+| `CallEventProducer.publishCallEvent()` | call-service | `call-events` | `KafkaMessaging`, `KafkaEventConsumer`, `AnalyticsEventConsumer`, `KafkaAuditConsumer` | routing-service, websocket-gateway, analytics-service, audit-service |
+| `AgentEventProducer.publishAgentEvent()` | agent-state-service | `agent-events` | `AgentEventConsumer`, `KafkaEventConsumer`, `AnalyticsEventConsumer`, `KafkaAuditConsumer` | call-service, websocket-gateway, analytics-service, audit-service |
+| `KafkaMessaging.publishRoutingResult()` | routing-service | `routing-events` | `RoutingEventConsumer`(×2), `RoutingEventConsumer`, `KafkaEventConsumer` | agent-state-service, call-service, telephony-service, websocket-gateway |
+| `CallEventProducer.publishLifecycleEvent()` | call-service | `call-lifecycle-events` | `CallLifecycleConsumer`, `KafkaEventConsumer`, `AnalyticsEventConsumer`, `KafkaAuditConsumer` | agent-state-service, websocket-gateway, analytics-service, audit-service |
+| `UserService` (inline) | user-service | `user-events` | `KafkaAuditConsumer` | audit-service |
 
 ### 3. WebSocket (STOMP over SockJS)
 
@@ -138,62 +137,169 @@ Each service owns its own PostgreSQL database. No service directly queries anoth
 
 ---
 
-## Redis Usage Summary
+## Redis Key Lifecycle
 
-Redis serves as the **hot state layer** — the fast, in-memory source of truth for real-time decisions.
+Exact methods from `AgentStateService.updateRedisState()` and routing-service.
 
-| Key Pattern                          | Type             | Owner Service          | Purpose                                          |
-|--------------------------------------|------------------|------------------------|--------------------------------------------------|
-| `tenant:{id}:agent:{id}:state`       | Hash             | Agent State Service    | Agent's current status + last assigned time      |
-| `tenant:{id}:skill:{skill}:available`| Sorted Set       | Agent State Service    | Available agents per skill  , scored by LRU      |
-| `tenant:{id}:agent:{id}:heartbeat`   | String           | Agent State Service    | Heartbeat timestamp, TTL = 30s                   |
-| `tenant:{id}:call:queue`             | Sorted Set       | Routing Service        | Calls waiting for agents, scored by priority     |
-| `routing:lock:call:{id}`             | String           | Routing Service        | Distributed lock to prevent duplicate routing    |
-| `routing:assignment:call:{id}`       | String           | Routing Service        | Idempotency cache — remembers which agent was assigned |
-| `routing:retry:{tenant}:{call}:*`    | Multiple         | Routing Service (RetryProcessor) | Retry count, last retry time, call data |
-| `analytics:{tenant}:*`               | Strings          | Analytics Service      | Real-time counters (queue depth, agent counts) |
+```
+tenant:{id}:agent:{id}:state  (Hash)
+  Created:  agent logs in  → opsForHash().put(stateKey, "status", "AVAILABLE")
+  Updated:  every changeState() call
+  Deleted:  agent goes OFFLINE → redisTemplate.delete(stateKey)
+
+tenant:{id}:skill:{skill}:available  (Sorted Set — Score = lastAssignedTime)
+  Added:    agent AVAILABLE → opsForZSet().add(skillKey, agentId, score)
+  Removed:  agent BUSY or OFFLINE → opsForZSet().remove(skillKey, agentId)
+  Never deleted (shared across all agents with that skill)
+
+tenant:{id}:agent:{id}:heartbeat  (String, TTL=30s)
+  Set/Reset: Angular setInterval every 15s → POST /heartbeat
+             → AgentStateService.handleHeartbeat() → opsForValue().set(..., 30s TTL)
+  Expires:  auto-deleted after 30s if browser closes
+  Explicit delete: on logout
+
+routing:lock:call:{callId}  (String, short TTL)
+  Created:  before Lua script runs in routing-service (prevents race conditions)
+  Released: after routing decision is published
+
+routing:assignment:call:{callId}  (String)
+  Created:  after successful ASSIGNED routing event
+  Purpose:  idempotency — prevents Kafka re-delivery from double-assigning
+
+tenant:{id}:call:queue  (Sorted Set)
+  Added:    when no agent available → call enters retry queue
+  Removed:  when RetryProcessor successfully routes the call
+```
 
 ---
 
 ## Kafka Topics Summary
 
 | Topic | Partition Key | Purpose |
-| Topic                   | Partition Key | Purpose                                                  |
-|-------------------------|---------------|----------------------------------------------------------|
-| `call-events`           | `tenantId`    | New call created, call requeued after disconnect         |
-| `agent-events`          | `tenantId`    | Agent went AVAILABLE/BUSY/OFFLINE/DISCONNECTED          |
-| `routing-events`        | `tenantId`    | Call ASSIGNED to agent, NO_AGENT, ABANDONED              |
-| `call-lifecycle-events` | `tenantId`    | Call COMPLETED (triggers agent release)                  |
-| `user-events`           | `tenantId`    | User login/logout (for audit trail)                      |
+|---|---|---|
+| `call-events` | `tenantId` | New call created, call requeued after disconnect |
+| `agent-events` | `tenantId` | Agent went AVAILABLE/BUSY/OFFLINE/DISCONNECTED |
+| `routing-events` | `tenantId` | Call ASSIGNED to agent, NO_AGENT, ABANDONED |
+| `call-lifecycle-events` | `tenantId` | Call COMPLETED (triggers agent release) |
+| `user-events` | `tenantId` | User login/logout (for audit trail) |
+
+---
+
+## End-to-End Lifecycle (Annotated with Exact Class/Method Names)
+
+```
+1. AGENT LOGS IN
+   Angular → POST /api/v1/agents/{id}/login
+   → JwtAuthenticationFilter: validates JWT, headers.set("X-Tenant-Id", tenantId)
+   → AgentStateController.login()
+   → AgentStateService.changeState(tenantId, agentId, AVAILABLE)
+     → agentRepository.save()  [PG: agents.status = AVAILABLE]
+     → updateRedisState(agent, OFFLINE, AVAILABLE)
+         opsForHash().put(stateKey, "status", "AVAILABLE")
+         opsForZSet().add(skillKey, agentId, score)  ← enters routing pool
+     → AgentEventProducer.publishAgentEvent(AGENT_AVAILABLE)
+       → Kafka: agent-events
+         → KafkaEventConsumer (ws-gateway): browser shows green "Ready"
+         → AnalyticsEventConsumer: increments available count
+         → KafkaAuditConsumer: audit_events record written
+
+2. CALL CREATED
+   Angular → POST /api/v1/calls
+   → CallController.createCall()
+   → CallService.createCall()
+     → callRepository.save()  [PG: calls.status = QUEUED]
+     → CallEventProducer.publishCallEvent()
+       → Kafka: call-events
+         → KafkaMessaging.consumeCallEvent() (routing-service)  ← NEXT
+
+3. ROUTING ENGINE
+   routing-service: KafkaMessaging.consumeCallEvent()
+   → RoutingService.routeCall()
+     → Executes Lua script on Redis:
+         reads tenant:{id}:skill:{skill}:available (sorted set)
+         atomically selects agent with lowest score
+     → If agent found:
+         → KafkaMessaging.publishRoutingResult(ASSIGNED)
+           → Kafka: routing-events
+             → RoutingEventConsumer (call-service): PG calls.status = ROUTED
+             → RoutingEventConsumer (agent-state-service): agent → BUSY
+             → RoutingEventConsumer (telephony-service): bridge Twilio call
+             → KafkaEventConsumer (ws-gateway): browser shows "On Call"
+     → If no agent:
+         → add to Redis retry queue
+         → publishRoutingResult(NO_AGENT_AVAILABLE)
+
+4. AGENT GOES BUSY
+   agent-state-service: RoutingEventConsumer.handleRoutingEvent()
+   → AgentStateService.handleRoutingEvent()
+     → agentRepository.save()  [PG: status=BUSY, activeCallId=callId]
+     → updateRedisState(agent, AVAILABLE, BUSY)
+         opsForHash().put(stateKey, "status", "BUSY")
+         opsForZSet().remove(skillKey, agentId)  ← leaves routing pool
+     → AgentEventProducer.publishAgentEvent(AGENT_BUSY)
+       → Kafka: agent-events → ws-gateway → browser: "On Call" indicator
+
+5. CALL COMPLETES
+   Angular → POST /api/v1/calls/{callId}/complete
+   → CallService.completeCall()
+     → callRepository.save()  [PG: status=COMPLETED]
+     → CallEventProducer.publishLifecycleEvent(CALL_COMPLETED)
+       → Kafka: call-lifecycle-events
+         → CallLifecycleConsumer (agent-state-service):
+             AgentStateService.handleCallCompletion()
+             → agentRepository.save()  [PG: status=AVAILABLE, activeCallId=null]
+             → updateRedisState(agent, BUSY, AVAILABLE)
+                 opsForZSet().add(skillKey, agentId, newScore)  ← re-enters pool
+             → publishAgentEvent(AGENT_AVAILABLE)
+         → KafkaEventConsumer (ws-gateway): browser clears call card after 3s
+         → AnalyticsEventConsumer: updates metrics
+         → KafkaAuditConsumer: audit record written
+
+6. AGENT DISCONNECTS (browser crash)
+   Heartbeat stops → Redis heartbeat key TTL auto-expires after 30s
+   → AgentStateService.detectDisconnects() [@Scheduled every 10s]
+     → PG query: agents WHERE status IN (AVAILABLE,BUSY) AND lastHeartbeatAt < threshold
+     → For each expired agent:
+         agentRepository.save()  [PG: status=OFFLINE]
+         updateRedisState(agent, oldStatus, OFFLINE)
+           opsForZSet().remove(skillKey, agentId)
+           redisTemplate.delete(stateKey)
+         publishAgentEvent(AGENT_DISCONNECTED)
+           → Kafka: agent-events
+             → AgentEventConsumer (call-service):
+                 if agent had activeCallId → CallService requeues call
+                 → CallEventProducer.publishCallEvent() → routing-service retries
+```
 
 ---
 
 ## Multi-Tenancy
 
-Every piece of data in the system is scoped by `tenantId`. This means:
-- Every API request carries a tenant ID (extracted from the JWT by the API Gateway)
-- Every database query is filtered by tenant ID
-- Every Redis key is prefixed with `tenant:{tenantId}:`
+Every piece of data is scoped by `tenantId`:
+- API Gateway's `JwtAuthenticationFilter` extracts `tenantId` from JWT and injects it as `X-Tenant-Id` header using `headers.set()` (overwrite, not append — prevents browser spoofing)
+- Every PG query filters by `tenantId`
+- Every Redis key is prefixed `tenant:{tenantId}:`
 - Every Kafka message is partitioned by `tenantId`
-- No tenant can ever see another tenant's agents, calls, or data
 
 ---
 
 ## Key Design Decisions
 
 | Decision | Rationale |
-| Decision                                  | Rationale                                                                |
-|-------------------------------------------|--------------------------------------------------------------------------|
-| **Redis as primary state for routing**    | Decisions must be < 200ms. PG is too slow for real-time selection.       |
-| **Kafka for inter-service communication** | Decouples services. Events are durable and replayable.                   |
-| **Lua scripts for atomic selection**      | Prevents race conditions during simultaneous assignments.                |
-| **Fibonacci backoff for retries**         | Scales delays (1, 1, 2, 3...) to avoid overwhelming the system.          |
-| **Heartbeat-based disconnect detection**  | Detects crashes within 30s and triggers automatic call recovery.         |
-| **Idempotency cache for routing**         | Ensures "at-least-once" Kafka delivery doesn't double-assign calls.      |
-| **Separate database per service**         | Enforces strict boundaries and prevents accidental data coupling.         |
+|---|---|
+| **Redis as primary state for routing** | Decisions must be <200ms. PG is too slow for real-time selection. |
+| **Kafka for inter-service communication** | Decouples services. Events are durable and replayable. |
+| **Lua scripts for atomic selection** | Prevents race conditions during simultaneous assignments. |
+| **Fibonacci backoff for retries** | Scales delays (1,1,2,3...) to avoid overwhelming the system. |
+| **Heartbeat-based disconnect detection** | Detects crashes within 30s, triggers automatic call recovery. |
+| **Idempotency cache for routing** | Ensures at-least-once Kafka delivery doesn't double-assign calls. |
+| **Separate database per service** | Enforces strict boundaries, prevents accidental data coupling. |
+| **`required=false` on X-Internal-Key** | Lets service return 401 (not Spring's default 400) on missing key. |
+| **`anyExchange().permitAll()` in Gateway** | All auth delegated to `JwtAuthenticationFilter` GlobalFilter — Spring Security only disables CSRF. |
+| **`headers.set()` not `headers.add()`** | Overwrites browser-injected X-Tenant-Id to prevent tenant spoofing. |
 
 ---
 
 ## How to Explain This in an Interview
 
-> "I built a multi-tenant cloud contact center platform with 9 Spring Boot microservices. When a customer call comes in, it hits the call-service which persists it and publishes an event to Kafka. The routing-service consumes that event and uses a Redis Lua script to atomically find the best available agent based on skill-matching and least-recently-used scheduling. Once matched, the agent's state flips to BUSY in Redis and PostgreSQL, and a WebSocket push notifies the agent's browser in real-time. If no agent is available, the call enters a retry queue with Fibonacci backoff. The system handles agent crashes through heartbeat-based disconnect detection — if an agent's browser dies, their active call is automatically requeued to another agent within 30 seconds. Everything is multi-tenant isolated, event-driven, and uses Redis as the hot state layer for sub-200ms routing decisions."
+> "I built a multi-tenant cloud contact center platform with 9 Spring Boot microservices. The API Gateway validates JWTs and injects tenant context as headers so no downstream service needs to parse tokens. When a customer call comes in, the call-service persists it and publishes to the `call-events` Kafka topic. The routing-service consumes that event and executes a Redis Lua script to atomically find the longest-idle available agent for the required skill. Once matched, the agent's state flips to BUSY across both Redis and PostgreSQL, and a WebSocket push from the websocket-gateway notifies the agent's browser in real-time. If no agent is available, the call enters a Fibonacci backoff retry queue. Disconnect recovery works via heartbeats — if an agent's browser crashes, their Redis heartbeat key expires after 30s, a `@Scheduled` job detects it, marks them OFFLINE, and publishes an `AGENT_DISCONNECTED` event that triggers the call-service to requeue the orphaned call."

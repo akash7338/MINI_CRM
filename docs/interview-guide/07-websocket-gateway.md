@@ -42,30 +42,75 @@ The gateway is the **last mile** of every event's journey: it's the final hop fr
 
 The gateway has **no REST endpoints** (besides health). All communication is via WebSocket push.
 
-### STOMP Frame Flow
+### WebSocket Configuration (from `WebSocketConfig.java`)
+```java
+// Broker setup
+config.enableSimpleBroker("/topic");        // in-memory broker, prefix for server-push destinations
+config.setApplicationDestinationPrefixes("/app");  // prefix for client-to-server messages
+
+// STOMP endpoint
+registry.addEndpoint("/ws")               // browsers connect to: ws://host:8088/ws
+    .setAllowedOriginPatterns("*")
+    .withSockJS();                          // SockJS fallback for environments without native WS
+
+// Channel interceptor (registered in configureClientInboundChannel)
+registration.interceptors(authChannelInterceptor);  // AuthChannelInterceptor.preSend() runs on EVERY frame
+```
+
+### STOMP Frame Flow (exact `AuthChannelInterceptor.preSend()` logic)
 ```
 1. CONNECT frame
-   Header: Authorization: Bearer <JWT>
-   → AuthChannelInterceptor validates JWT
-   → Extracts tenantId, stores in session attributes
-   → Sets Spring Security principal
+   STOMP header: Authorization: Bearer <JWT>
+   → AuthChannelInterceptor.preSend(message, channel)
+       accessor.getCommand() == CONNECT
+       authHeader = accessor.getFirstNativeHeader("Authorization")
+       token = authHeader.substring(7)
+       jwtUtil.validateToken(token)?
+         if false → throw IllegalArgumentException("Unauthorized")  ← rejects connection
+       claims = jwtUtil.getAllClaimsFromToken(token)
+       tenantId = claims.get("tenantId", String.class)
+       userId = claims.getSubject()
+       auth = new UsernamePasswordAuthenticationToken(userId, null, emptyList())
+       accessor.getSessionAttributes().put("tenantId", tenantId)  ← stored for SUBSCRIBE check
+       accessor.setUser(auth)
+       → return message (connection proceeds)
 
 2. SUBSCRIBE frame
    Destination: /topic/events/tenant1
-   → AuthChannelInterceptor checks tenantId matches session
-   → Blocks cross-tenant subscriptions
+   → AuthChannelInterceptor.preSend(message, channel)
+       accessor.getCommand() == SUBSCRIBE
+       destination = accessor.getDestination()   // "/topic/events/tenant1"
+       tenantId = accessor.getSessionAttributes().get("tenantId")  // from CONNECT step
+       requestedTenantId = destination.substring("/topic/events/".length())  // "tenant1"
+       if tenantId == null || requestedTenantId != tenantId:
+         throw IllegalArgumentException("Forbidden")  ← cross-tenant blocked
+       → return message (subscription proceeds)
 
-3. MESSAGE frames (server → client)
+3. MESSAGE frames (server → client, pushed by KafkaEventConsumer)
+   messagingTemplate.convertAndSend("/topic/events/tenant1", RealtimeEvent)
    Destination: /topic/events/tenant1
-   Body: { topic, payload, receivedAt }
-   → Pushed by KafkaEventConsumer via SimpMessagingTemplate
+   Body (JSON): { "topic": "agent-events", "payload": {...}, "receivedAt": "2026-05-17T..." }
+   → SimpleBroker fans out to all subscribers on /topic/events/tenant1
+   → All browsers for that tenant receive the event simultaneously
 ```
 
 ---
 
 ## 5. Kafka Usage
 
-### Consumes ← 4 Topics
+### Consumes ← 4 Topics (single method, `@Header` injection)
+
+**Single consumer method handles all 4 topics:**
+```java
+@KafkaListener(
+    topics = {"call-events", "routing-events", "agent-events", "call-lifecycle-events"},
+    groupId = "websocket-gateway-group"
+)
+public void consume(
+    String message,
+    @Header(KafkaHeaders.RECEIVED_TOPIC) String topic  // which topic this message came from
+)
+```
 
 | Topic | What It Contains |
 |---|---|
@@ -74,13 +119,14 @@ The gateway has **no REST endpoints** (besides health). All communication is via
 | `agent-events` | Agent went available, busy, offline, disconnected |
 | `call-lifecycle-events` | Call completed |
 
-**Consumer Group:** `websocket-gateway-group`
-
-**Processing Logic (`KafkaEventConsumer.consume()`):**
-1. Parse JSON payload
-2. Extract `tenantId` from the JSON
-3. Wrap in `RealtimeEvent` object: `{ topic, payload, receivedAt }`
-4. Send to `/topic/events/{tenantId}` via `SimpMessagingTemplate.convertAndSend()`
+**Processing logic inside `consume()`:**
+1. `objectMapper.readTree(message)` — parses JSON into `JsonNode`
+2. `node.get("tenantId").asText()` — extracts tenant from payload
+3. Wraps in `RealtimeEvent.builder().topic(topic).payload(node).receivedAt(Instant.now()).build()`
+4. `messagingTemplate.convertAndSend("/topic/events/" + tenantId, event)`
+5. If `tenantId == null` or blank — **silently drops the event** (no send)
+6. If JSON parse fails — sets `payload = raw message string`, still pushes if tenantId found
+7. On any exception — throws `RuntimeException` to trigger Kafka DLQ
 
 All events for a tenant go to the **same channel**. The frontend's `SessionStateService.handleEvent()` uses the `topic` field to determine how to handle each event type.
 
@@ -153,8 +199,83 @@ This prevents any user from subscribing to another tenant's event stream, even w
 
 ## 11. Interview Explanation
 
-> "The WebSocket Gateway is the real-time event delivery layer. It maintains persistent STOMP-over-SockJS WebSocket connections with all connected browsers. It consumes from four Kafka topics — call-events, routing-events, agent-events, and call-lifecycle-events — and pushes every event to the browser in real-time via Spring's `SimpMessagingTemplate`. Authentication happens on the STOMP CONNECT frame — the `AuthChannelInterceptor` validates the JWT and extracts the tenantId into session attributes. On SUBSCRIBE, it enforces tenant isolation by verifying the subscription destination matches the authenticated tenant — so tenant A can never see tenant B's events. The frontend's `SessionStateService` then routes each event based on its topic field to update status badges, show/hide the call panel, and maintain the activity log. This eliminates the need for HTTP polling and gives us sub-200ms UI updates."
+> "The WebSocket Gateway is the real-time event delivery layer. It maintains persistent STOMP-over-SockJS WebSocket connections with all connected browsers. It consumes from four Kafka topics — call-events, routing-events, agent-events, and call-lifecycle-events — using a **single `consume()` method** that uses Spring's `@Header(KafkaHeaders.RECEIVED_TOPIC)` annotation to know which topic a message came from. It pushes every event to the browser in real-time via Spring's `SimpMessagingTemplate`. Authentication happens on the STOMP CONNECT frame — the `AuthChannelInterceptor.preSend()` validates the JWT and extracts the tenantId into session attributes. On SUBSCRIBE, it enforces tenant isolation by verifying the subscription destination matches the authenticated tenant — so tenant A can never see tenant B's events. The frontend's `SessionStateService` then routes each event based on its `topic` field to update status badges, show/hide the call panel, and maintain the activity log. This eliminates the need for HTTP polling and gives us sub-200ms UI updates."
 
-### Key Technical Detail Worth Mentioning
+### Key Technical Details Worth Mentioning
 
 The gateway uses **one unified channel per tenant** (`/topic/events/{tenantId}`) rather than separate channels per event type. This simplifies the subscription model — the browser subscribes once and the frontend handles filtering. The trade-off is that every browser receives every event for their tenant (including events for other agents), but since the frontend filters by `agentId`, this is harmless and keeps the architecture simpler.
+
+**Scaling limitation:** The current `SimpleBroker` is **in-memory only**. In a multi-instance deployment, each gateway instance would only know about its own WebSocket connections. If instance A handles a Kafka message, it can only push to browsers connected to instance A. To fix this in production, replace `enableSimpleBroker("/topic")` with `enableStompBrokerRelay()` backed by a Redis or RabbitMQ broker.
+
+---
+
+## 12. Annotated Flow Traces (Exact Methods)
+
+### Angular WebSocket Connection Lifecycle
+```
+Angular app loads:
+→ SessionStateService constructor calls WebsocketService.connect()
+→ SockJS("http://localhost:8088/ws")
+→ STOMP CONNECT frame:
+    Authorization: Bearer eyJhbGci...
+    → AuthChannelInterceptor.preSend()
+        command == CONNECT
+        token = header.substring(7)
+        jwtUtil.validateToken(token)  ← shared JwtUtil from shared-common
+        if valid:
+          tenantId = claims.get("tenantId")
+          sessionAttributes.put("tenantId", tenantId)
+          accessor.setUser(UsernamePasswordAuthenticationToken)
+          connection proceeds
+        if invalid:
+          throw IllegalArgumentException("Unauthorized")  ← connection rejected
+
+→ STOMP SUBSCRIBE frame:
+    Destination: /topic/events/tenant1
+    → AuthChannelInterceptor.preSend()
+        command == SUBSCRIBE
+        requestedTenantId = "tenant1"  (parsed from destination)
+        sessionTenantId = sessionAttributes.get("tenantId")  // set at CONNECT
+        if mismatch: throw IllegalArgumentException("Forbidden")
+        subscription proceeds
+        Browser now receives all events for tenant1
+```
+
+### Kafka Event → Browser Push
+```
+Kafka: agent-events message (JSON string)
+{
+  "eventType": "AGENT_BUSY",
+  "agentId": "AG_001",
+  "tenantId": "tenant1",
+  "newStatus": "BUSY",
+  ...
+}
+
+→ KafkaEventConsumer.consume(message, topic="agent-events")
+    → node = objectMapper.readTree(message)
+    → tenantId = node.get("tenantId").asText()  // "tenant1"
+    → if tenantId blank: drop silently, return
+    → event = RealtimeEvent {
+          topic: "agent-events",
+          payload: node,                    ← full JSON object
+          receivedAt: Instant.now()
+      }
+    → messagingTemplate.convertAndSend("/topic/events/tenant1", event)
+        → SimpleBroker fans out to all subscribers on /topic/events/tenant1
+        → Every browser tab for tenant1 receives:
+            { "topic": "agent-events", "payload": {...}, "receivedAt": "..." }
+
+Angular SessionStateService.handleEvent(event):
+  switch(event.topic):
+    "agent-events":
+      if event.payload.agentId == myAgentId:
+        update status badge to event.payload.newStatus
+    "routing-events":
+      if event.payload.agentId == myAgentId && status == "ASSIGNED":
+        show call panel, set status to "On Call"
+    "call-lifecycle-events":
+      if event.payload.agentId == myAgentId && eventType == "CALL_COMPLETED":
+        setTimeout(() => clearCallPanel(), 3000)
+```
+

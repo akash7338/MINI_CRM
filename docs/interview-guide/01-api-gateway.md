@@ -35,20 +35,20 @@ The **only** traffic that bypasses the gateway:
 
 ## 4. APIs Exposed
 
-The gateway doesn't have its own REST controllers. It is purely a **reverse proxy** with a security filter. Every route maps to a downstream service:
+The gateway doesn't have its own REST controllers. It is purely a **reverse proxy** with a security filter. Every route maps to a downstream service (from `application.yml`):
 
-| Path Pattern | Downstream Service | Port |
-|---|---|---|
-| `/api/v1/auth/**` | user-service | 8090 |
-| `/api/v1/users/**` | user-service | 8090 |
-| `/api/v1/agents/**` | agent-state-service | 8086 |
-| `/api/v1/calls/**` | call-service | 8087 |
-| `/api/v1/analytics/**` | analytics-service | 8089 |
-| `/api/v1/websocket/**`, `/ws/**` | websocket-gateway | 8088 |
-| `/api/v1/telephony/**` | telephony-service | 8092 |
+| Route ID | Path Pattern | Downstream Service | Port |
+|---|---|---|---|
+| `agent-state-internal-block` | `/api/v1/agents/internal` | agent-state-service | 8086 (blocked: returns 403 immediately via `SetStatus=403` filter) |
+| `user-service` | `/api/v1/auth/**`, `/api/v1/users/**` | user-service | 8090 |
+| `agent-state-service` | `/api/v1/agents/**` | agent-state-service | 8086 |
+| `call-service` | `/api/v1/calls/**` | call-service | 8087 |
+| `analytics-service` | `/api/v1/analytics/**` | analytics-service | 8089 |
+| `websocket-gateway` | `/api/v1/websocket/**`, `/ws/**` | websocket-gateway | 8088 |
+| `telephony-service` | `/api/v1/telephony/**` | telephony-service | 8092 |
 
-**Special route:**
-- `/api/v1/agents/internal` → **blocked** with HTTP 403. This is the internal-only endpoint that user-service uses to create agent profiles. The gateway prevents external callers from hitting it.
+**Security note on the internal block:**
+The route `agent-state-internal-block` uses Spring Cloud Gateway's `SetStatus=403` filter. This means the gateway matches the path and immediately returns 403 **before** the request ever reaches the `JwtAuthenticationFilter`. Route matching happens before global filters run.
 
 ### Open Endpoints (no JWT required)
 
@@ -101,7 +101,63 @@ IF role == AGENT:
 
 ---
 
-## 9. Interaction With Other Services
+## 9. Request Lifecycle (Annotated — Exact Methods)
+
+This is the complete journey of a single authenticated request through the gateway:
+
+```
+Browser sends:
+  POST /api/v1/agents/AG_001/login
+  Authorization: Bearer eyJhbGci...
+
+Step 1: Route Resolution (application.yml — happens FIRST, before any filter)
+  Gateway checks predicates in order:
+  ✗ /api/v1/agents/internal? No match
+  ✓ /api/v1/agents/**? Match!
+  → Tags request with destination: http://localhost:8086
+  → (If no route matched at all → 404, filter never runs)
+
+Step 2: JwtAuthenticationFilter.filter() [GlobalFilter, Order = -1]
+  → isSecured("/api/v1/agents/AG_001/login")?
+      OPEN_ENDPOINTS.stream().noneMatch(path::startsWith)  → true (secured)
+  → request.getHeaders().containsKey(AUTHORIZATION)? → yes
+  → authHeader.startsWith("Bearer ")? → yes
+  → token = authHeader.substring(7)
+  → jwtUtil.validateToken(token)
+      → JwtUtil.validateToken(): parses signature + checks expiry
+      → if false → onError(exchange, "Invalid or expired token", 401)
+  → claims = jwtUtil.getAllClaimsFromToken(token)
+      → extracts: tenantId, role, agentId, userId (from claims.getSubject())
+  → tenantId null check → if null → onError(403)
+  → RBAC check (only if role == "AGENT"):
+      path.startsWith("/api/v1/users/") → false
+      path.startsWith("/api/v1/analytics/") → false
+      path.startsWith("/api/v1/agents/") && path != "/api/v1/agents/" + agentId → false
+  → exchange.getRequest().mutate().headers(h -> {
+        h.set("X-Tenant-Id", tenantId);   // OVERWRITES any browser-sent value
+        h.set("X-User-Id", userId);
+        h.set("X-User-Role", role);
+        h.set("X-Agent-Id", agentId);      // only if agentId != null
+    })
+  → chain.filter(exchange)  // passes to next filter → routing
+
+Step 3: NettyRoutingFilter (built-in, runs last — NOT in application.yml)
+  → reads the destination URL tagged in Step 1
+  → opens TCP connection to http://localhost:8086
+  → forwards the mutated request (with X-Tenant-Id etc.) over the network
+  → streams the response back to the browser
+
+Step 4: DedupeResponseHeader (default-filters in application.yml)
+  - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_FIRST
+  → On the RESPONSE path (exit side):
+      if response has duplicate CORS headers (from both gateway and downstream),
+      keeps only the FIRST occurrence
+  → Prevents browser CORS errors caused by double-injection
+```
+
+---
+
+## 10. Interaction With Other Services
 
 | Direction | Service | How | Why |
 |---|---|---|---|

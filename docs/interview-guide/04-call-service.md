@@ -31,15 +31,17 @@ Manages the entire call lifecycle from creation to completion — persists call 
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `POST /api/v1/calls` | POST | Create a new call. Body: `{requiredSkills, priority}` |
+| `POST /api/v1/calls` | POST | Create a new call. Body: `{callerId, requiredSkills, priority}` |
 | `GET /api/v1/calls/{callId}` | GET | Get call details (with tenant check) |
 | `POST /api/v1/calls/{callId}/start` | POST | Transition ROUTED → IN_PROGRESS |
-| `POST /api/v1/calls/{callId}/complete` | POST | Transition IN_PROGRESS → COMPLETED |
+| `POST /api/v1/calls/{callId}/complete` | POST | Transition IN_PROGRESS → COMPLETED, publishes `CALL_COMPLETED` lifecycle event |
+| `POST /api/v1/calls/{callId}/reject` | POST | Transition ROUTED → QUEUED. Requeues call (`isNew: false`) AND publishes `CALL_COMPLETED` to free the rejecting agent |
 
 ### Validation Rules
-- `startCall()` — Call must be in ROUTED status, otherwise `409 CONFLICT`
-- `completeCall()` — Call must be in IN_PROGRESS status, otherwise `409 CONFLICT`
-- `getCall()` — tenantId must match, otherwise `403 FORBIDDEN`
+- `startCall()` — Call must be in `ROUTED` status, otherwise `409 CONFLICT`
+- `completeCall()` — Call must be in `IN_PROGRESS` status, otherwise `409 CONFLICT`
+- `rejectCall()` — Call must be in `ROUTED` status, otherwise `409 CONFLICT`
+- `getCall()` — `tenantId` must match, otherwise `403 FORBIDDEN`
 
 ---
 
@@ -62,11 +64,12 @@ This event triggers the agent-state-service to release the agent back to AVAILAB
 
 ### Consumes ← `routing-events`
 - **Consumer:** `RoutingEventConsumer` (group: `call-service-group`)
-- **Handler:** `CallService.handleRoutingEvent()`
-- **Logic:**
-  - `ASSIGNED` → set call status to ROUTED, store `assignedAgentId`
-  - `NO_AGENT` → set call status to QUEUED, store failure reason
-  - `ERROR` / `failed` → set call status to FAILED
+- **Handler:** `CallService.handleRoutingEvent(RoutingEvent event)`
+- **Logic (from source):**
+  - `"ASSIGNED"` → `call.setStatus(ROUTED)`, `call.setAssignedAgentId(event.agentId)`, save
+  - `"NO_AGENT"` → `call.setStatus(QUEUED)`, `call.setRoutingFailureReason(msg)`, save
+  - `"ERROR"` or `"failed"` → `call.setStatus(FAILED)`, save
+  - `"ABANDONED"` → `call.setStatus(ABANDONED)`, save. **Also:** if `call.assignedAgentId != null`, publishes a `CALL_COMPLETED` lifecycle event to free the agent (even on abandonment)
 
 ### Consumes ← `agent-events`
 - **Consumer:** `AgentEventConsumer` (group: `call-service-agent-recovery-group`)
@@ -115,14 +118,17 @@ This event triggers the agent-state-service to release the agent back to AVAILAB
 ### Call Status State Machine
 ```
   [QUEUED] ──── ASSIGNED ────► [ROUTED] ──── startCall() ────► [IN_PROGRESS] ──── completeCall() ────► [COMPLETED]
-     ▲              │                                                                                      
-     │              │                                                                                      
-     │         NO_AGENT                                                                                    
-     │         (stays QUEUED)                                                                              
-     │                                                                                                     
-     └── agent disconnect ──── requeue ──── republish to call-events                                       
-                                                                                                           
-  [FAILED] ◄── ERROR/failed routing                                                                        
+     ▲    │                    │
+     │    NO_AGENT            reject()
+     │    (stays QUEUED)       │
+     │                         ▼
+     │                    REQUEUE (isNew=false)
+     │                    → re-enters routing
+     │
+     └── agent disconnect ──── requeue ──── republish to call-events
+
+  [FAILED] ◄── ERROR routing
+  [ABANDONED] ◄── max retries exceeded (10 retries, ~114s)
 ```
 
 ### Status Descriptions
@@ -166,3 +172,89 @@ This event triggers the agent-state-service to release the agent back to AVAILAB
 ## 11. Interview Explanation
 
 > "The call-service owns the call lifecycle. When a call is created — either simulated from the dashboard or from a real Twilio inbound — it's persisted in PostgreSQL with status QUEUED and an event is published to Kafka. The routing-service picks it up, finds an agent, and publishes an ASSIGNED event back. The call-service consumes that event and updates the call to ROUTED. The agent then starts and completes the call via REST endpoints, with strict state validation at each step. The most interesting part is the agent disconnect recovery — the service listens for AGENT_DISCONNECTED events from Kafka, finds all active calls for that agent, resets them to QUEUED, and republishes them to the call-events topic with a `isNew: false` flag so they get re-routed to a different agent without being double-counted in analytics."
+
+---
+
+## 12. Annotated Flow Traces (Exact Methods)
+
+### Flow 1: Call Created
+```
+Browser: POST /api/v1/calls  { callerId, requiredSkills: ["sales"], priority: 2 }
+→ CallController.createCall(@RequestHeader X-Tenant-Id, @RequestBody)
+→ CallService.createCall(tenantId, request)
+    → priority = request.getPriority() ?? 1
+    → Call.builder().status(QUEUED)....build()
+    → callRepository.save(call)  [PG INSERT: calls table]
+    → CallEvent.builder().callId(call.id).tenantId(...).requiredSkills(...).priority(...)build()
+    → callEventProducer.publishCallEvent(event)
+        → kafkaTemplate.send("call-events", tenantId, message)
+          → KafkaMessaging.consumeCallEvent() (routing-service)  ← NEXT
+    → returns CallResponse { id, status=QUEUED, ... }
+```
+
+### Flow 2: Routing Result Arrives
+**Consumer:** `RoutingEventConsumer` (group: `call-service-group`)
+```
+Kafka: routing-events message
+→ CallService.handleRoutingEvent(RoutingEvent event)
+    → callRepository.findById(event.callId)  [PG SELECT]
+    → tenant safety check: event.tenantId == call.tenantId
+    → switch(event.status):
+        "ASSIGNED":
+          call.setStatus(ROUTED)
+          call.setAssignedAgentId(event.agentId)
+          call.setRoutingFailureReason(null)
+        "NO_AGENT":
+          call.setStatus(QUEUED)  [stays in queue]
+          call.setRoutingFailureReason(event.message)
+        "ERROR" / "failed":
+          call.setStatus(FAILED)
+        "ABANDONED":
+          call.setStatus(ABANDONED)
+          if call.assignedAgentId != null:
+            callEventProducer.publishLifecycleEvent(CALL_COMPLETED)
+              ← forces agent back to AVAILABLE even on abandoned calls
+    → callRepository.save(call)  [PG UPDATE]
+```
+
+### Flow 3: Agent Rejects Call
+```
+Browser: POST /api/v1/calls/{callId}/reject
+→ CallController.rejectCall()
+→ CallService.rejectCall(callId, tenantId)
+    → callRepository.findById(callId)
+    → if call.status != ROUTED → throw 409 CONFLICT
+    → rejectedAgentId = call.getAssignedAgentId()
+    → call.setStatus(QUEUED)
+    → call.setAssignedAgentId(null)
+    → callRepository.save(call)  [PG UPDATE: status=QUEUED, assigned_agent_id=null]
+    → callEventProducer.publishCallEvent(
+          CallEvent { callId, tenantId, requiredSkills, priority, newCall=false })
+      ← "newCall=false" prevents double-counting in analytics
+      → Kafka: call-events → routing-service tries again
+    → if rejectedAgentId != null:
+        callEventProducer.publishLifecycleEvent(
+            CallLifecycleEvent { eventType="CALL_COMPLETED", callId, tenantId, agentId=rejectedAgentId })
+        → Kafka: call-lifecycle-events
+          → CallLifecycleConsumer (agent-state-service):
+              AgentStateService.handleCallCompletion() → agent → AVAILABLE
+```
+
+### Flow 4: Agent Disconnect Recovery
+**Consumer:** `AgentEventConsumer` (group: `call-service-agent-recovery-group`)
+```
+Kafka: agent-events { eventType="AGENT_DISCONNECTED", agentId, tenantId }
+→ CallService.handleAgentDisconnect(AgentEvent event)
+    → if event.eventType != "AGENT_DISCONNECTED" → return
+    → callRepository.findByAssignedAgentIdAndStatusIn(agentId, [ROUTED, IN_PROGRESS])
+       [PG: SELECT * FROM calls WHERE assigned_agent_id=? AND status IN ('ROUTED','IN_PROGRESS')]
+    → if empty → log, return
+    → for each active call:
+        if call.status == QUEUED: skip (idempotency — already requeued)
+        call.setStatus(QUEUED)
+        call.setAssignedAgentId(null)
+        callRepository.save(call)  [PG UPDATE]
+        callEventProducer.publishCallEvent(CallEvent { ..., newCall=false })
+          → Kafka: call-events → routing-service picks up orphaned call
+```
+

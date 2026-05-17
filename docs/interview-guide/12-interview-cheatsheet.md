@@ -6,7 +6,7 @@ Quick-fire answers to every question an interviewer will ask about this project.
 
 ## 🎯 The Elevator Pitch (30 seconds)
 
-> "I built a multi-tenant cloud contact center platform with 9 Spring Boot microservices. When a customer call comes in, it's persisted and published to Kafka. A routing service consumes the event and runs a Redis Lua script to atomically find the best available agent by intersecting skill-based sorted sets with LRU scheduling. The agent's browser gets a real-time WebSocket push within 200ms. If no agent is available, the call enters a retry queue with Fibonacci backoff. I also designed heartbeat-based disconnect detection and debugged a production-grade distributed race condition where browser refreshes caused infinite call re-assignment loops."
+> "I built a multi-tenant cloud contact center platform with 9 Spring Boot microservices. When a customer call comes in, `CallService.createCall()` persists it and publishes to the `call-events` Kafka topic. The routing service's `RoutingEngine.assignAgent()` runs a Redis Lua script to atomically intersect skill sorted sets, picks the LRU agent, and publishes ASSIGNED to `routing-events`. That single event triggers 6 parallel consumers — agent-state-service, call-service, telephony-service, websocket-gateway, analytics-service, and audit-service — each updating their own state. The agent's browser gets a real-time WebSocket push within 200ms. I also debugged a distributed race condition where browser refreshes caused infinite call re-assignment loops, fixed with a two-layer defense in `RoutingEngine` and `AgentStateService.handleRoutingEvent()`."
 
 ---
 
@@ -47,13 +47,16 @@ Quick-fire answers to every question an interviewer will ask about this project.
 
 ### "How does the routing engine work?"
 
-> 1. **Consume** — Routing service reads a `call-events` Kafka message
-> 2. **Lock** — Acquires a distributed Redis lock for the call ID (prevents duplicate routing)
-> 3. **Idempotency check** — Checks if this call was already assigned (handles Kafka duplicates)
-> 4. **Lua script** — Atomically: ZINTERSTORE across skill sorted sets → ZRANGE to pick the lowest-scored (LRU) agent → ZREM from all sets → HSET state to BUSY
-> 5. **Persist** — Saves assignment to PostgreSQL
-> 6. **Cache** — Stores assignment in Redis (1-hour TTL) for idempotency
-> 7. **Publish** — Sends `ASSIGNED` event to `routing-events` Kafka topic
+> **Exact call chain:** `KafkaMessaging.consumeCallEvent()` → `routingService.processRouting()` → `routingEngine.assignAgent()`
+>
+> 1. **Consume** — `KafkaMessaging` reads a `call-events` message (group: `routing-service-group`)
+> 2. **Lock** — `SET routing:lock:call:{callId} {uuid} NX PX 10000` (10-second NX lock)
+> 3. **Idempotency check** — `GET routing:assignment:call:{callId}` — if hit, verify agent's Redis state is not OFFLINE before trusting it
+> 4. **Lua script** — `SELECT_AGENT_LUA`: ZINTERSTORE temp key across all required skill sets → ZRANGE 0 0 → ZREM agent from all skill sets → HSET agent state hash to BUSY (all atomic)
+> 5. **Persist** — `routingResultRepository.save(RoutingResult)` [PG]
+> 6. **Cache** — `SET routing:assignment:call:{callId} {agentId} EX 3600` (1-hour TTL)
+> 7. **Publish** — `KafkaMessaging.produceRoutingEvent()` → `routing-events` topic
+> 8. **Release lock** — CAS delete via Lua: `if redis.call('get',key)==value then return redis.call('del',key) end`
 
 ### "Why Redis Lua scripts?"
 
@@ -85,30 +88,30 @@ Quick-fire answers to every question an interviewer will ask about this project.
 
 ### "How do you detect agent disconnects?"
 
-> **Heartbeat mechanism:**
-> 1. Browser sends `POST /agents/{id}/heartbeat` every 15 seconds
-> 2. Server stores the timestamp in Redis with a 30-second TTL
-> 3. A `@Scheduled` job (`detectDisconnects()`) runs every 10 seconds
-> 4. It queries PostgreSQL for agents whose `lastHeartbeatAt` is older than 30 seconds
-> 5. If found, the agent is marked OFFLINE and an `AGENT_DISCONNECTED` event is published to Kafka
-> 6. The call-service consumes this event and requeues any active calls for that agent
+> **Exact method chain:**
+> 1. Browser → `POST /api/v1/agents/{id}/heartbeat` (every 15s) → `AgentStateController.heartbeat()` → `AgentStateService.handleHeartbeat(agentId)`
+> 2. `handleHeartbeat()`: `opsForValue().set(heartbeatKey, "alive", 30000, MILLISECONDS)` [Redis SETEX]
+> 3. `@Scheduled` every 10s: `AgentStateService.detectDisconnects()` runs
+> 4. Queries PG: `agentRepository.findByStatusInAndLastHeartbeatAtBefore(statuses, cutoff)` — finds agents whose heartbeat Redis key expired
+> 5. For each disconnected agent: `changeState(agent, OFFLINE)` → PG UPDATE + Redis HSET + Kafka `AGENT_DISCONNECTED` → `agent-events`
+> 6. `call-service`: `AgentEventConsumer` → `CallService.handleAgentDisconnect()` → requeues active call with `newCall: false` → `call-events`
 
 ### "Tell me about the bug you fixed."
 
 > **The Ghost Call Re-assignment Loop:**
-> 
+>
 > An F5 refresh killed the heartbeat for ~30 seconds. This triggered:
-> 1. Agent marked OFFLINE by disconnect detector
-> 2. Call-service requeued the active call to "save" the customer
-> 3. Routing-service checked its idempotency cache, found the same agent ID, and blindly re-assigned the call
-> 4. Agent-state-service received the ASSIGNED event and changed the OFFLINE agent back to BUSY
-> 5. Steps 2-4 repeated in an infinite loop every ~10 seconds
-> 
-> **Root cause:** The idempotency cache didn't verify if the cached agent was still online.
-> 
-> **Fix (two layers):**
-> - **Routing engine:** Before trusting the cache, verify the agent's Redis state. If OFFLINE, delete the cache and re-route
-> - **Agent state service:** Reject ASSIGNED events if the agent is currently OFFLINE (defense in depth)
+> 1. `AgentStateService.detectDisconnects()` → agent marked OFFLINE
+> 2. `CallService.handleAgentDisconnect()` → active call requeued with `newCall: false`
+> 3. `RoutingEngine.assignAgent()` → idempotency cache hit → returned cached `AG_001` without re-checking Redis state
+> 4. `AgentStateService.handleRoutingEvent()` → accepted ASSIGNED event → forced OFFLINE agent back to BUSY
+> 5. `detectDisconnects()` fires again → repeat infinitely
+>
+> **Root cause:** `RoutingEngine` trusted the idempotency cache without validating the cached agent's current Redis status.
+>
+> **Fix — exact code locations:**
+> - **`RoutingEngine.assignAgent()`:** If cache hit, call `redisTemplate.opsForHash().get(agentStateKey, "status")`. If `"OFFLINE"` → `DEL routing:assignment:call:{callId}` → re-run Lua script
+> - **`AgentStateService.handleRoutingEvent()`:** Added guard: `if (agent.getStatus() == OFFLINE) { log.warn("Breaking ping-pong loop"); return; }`
 
 ---
 
@@ -142,15 +145,15 @@ Quick-fire answers to every question an interviewer will ask about this project.
 
 ### "How do you push real-time updates to the browser?"
 
-> **STOMP over SockJS:**
-> 1. Browser opens a WebSocket connection to `/ws` with JWT in the CONNECT frame
-> 2. `AuthChannelInterceptor` validates the JWT, stores tenantId in session
-> 3. Browser subscribes to `/topic/events/{tenantId}`
-> 4. Interceptor verifies the subscription tenant matches the JWT tenant
-> 5. `KafkaEventConsumer` consumes from 4 Kafka topics
-> 6. Wraps each event in a `RealtimeEvent` envelope with topic + timestamp
-> 7. Pushes to `/topic/events/{tenantId}` via `SimpMessagingTemplate`
-> 8. Frontend's `SessionStateService.handleEvent()` routes by topic to update UI
+> **STOMP over SockJS — exact method chain:**
+> 1. Browser → SockJS → `WebSocketConfig`: endpoint `/ws` with `.withSockJS()`, broker `/topic`, app prefix `/app`
+> 2. CONNECT frame: `AuthChannelInterceptor.preSend()` → `jwtUtil.validateToken(token)` → `claims.get("tenantId")` → `sessionAttributes.put("tenantId", tenantId)` → `accessor.setUser(auth)`
+> 3. SUBSCRIBE `/topic/events/tenant1`: `AuthChannelInterceptor.preSend()` → `destination.substring("/topic/events/".length())` vs `sessionAttributes.get("tenantId")` → mismatch throws `IllegalArgumentException("Forbidden")`
+> 4. `KafkaEventConsumer.consume(String message, @Header(KafkaHeaders.RECEIVED_TOPIC) String topic)` — **single method** handles all 4 topics via `@Header` injection
+> 5. `objectMapper.readTree(message)` → extract `tenantId` → if blank, **silently drop**
+> 6. `RealtimeEvent.builder().topic(topic).payload(node).receivedAt(Instant.now()).build()`
+> 7. `messagingTemplate.convertAndSend("/topic/events/" + tenantId, event)`
+> 8. Frontend `SessionStateService.handleEvent()` switches on `event.topic`
 
 ### "Why not HTTP polling?"
 
@@ -162,15 +165,18 @@ Quick-fire answers to every question an interviewer will ask about this project.
 
 ### "How does a real phone call flow through the system?"
 
-> 1. Customer dials → Twilio POSTs to `/twilio/inbound` with CallSid
-> 2. Telephony service creates an internal call via REST to call-service
-> 3. Saves a `TelephonyCallSession` mapping CallSid ↔ internalCallId
-> 4. Returns TwiML: "Please wait" + redirect to `/bridge`
-> 5. Routing-service finds an agent, publishes ASSIGNED event
-> 6. Telephony-service consumes the event, stores the assignedAgentId
-> 7. Twilio polls `/bridge`, gets TwiML: `<Dial><Client>AG_001</Client></Dial>`
-> 8. Twilio connects the caller's audio to the agent's WebRTC browser session
-> 9. Twilio sends status callbacks (in-progress, completed) which trigger call lifecycle transitions
+> **Exact method chain:**
+> 1. Twilio → `POST /twilio/inbound?CallSid=CA...` → `TelephonyController.handleInbound()` → `TelephonyService.handleInboundCall()`
+> 2. Idempotency: `repository.findByTwilioCallSid(callSid)` — if exists, return existing `internalCallId`
+> 3. `callServiceClient.createInternalCall(tenantId, from)` [REST to call-service]
+> 4. `saveNewSession()` → `repository.save(TelephonyCallSession{status="ringing"})` [PG INSERT]
+> 5. **Controller** returns TwiML: `<Say>Please wait</Say><Redirect>/bridge?callSid=CA...</Redirect>`
+> 6. Routing assigns → Kafka `routing-events ASSIGNED` → `TelephonyService.handleAssignment()` → `session.setAssignedAgentId(agentId)` [PG UPDATE]
+> 7. Twilio polls `GET /bridge` → `TelephonyService.getBridgeTwiml()` → `<Dial answerOnBridge="true"><Client>AG_001</Client></Dial>`
+> 8. Twilio status `in-progress` → `TelephonyService.handleStatusCallback()` → `callServiceClient.startCall()` [REST]
+> 9. Twilio status `completed` → `callServiceClient.completeCall()` [REST] → call-service cascade
+>
+> **Token generation:** `TelephonyService.generateToken(agentId)` — two `ConcurrentHashMap`s (`tokenCache` + `tokenExpiry`), 5-second TTL. `identity = agentId` — this is what `<Client>AG_001</Client>` targets.
 
 ### "How does the agent hear the call?"
 
@@ -206,6 +212,12 @@ Quick-fire answers to every question an interviewer will ask about this project.
 > - Exponential backoff (1s initial, 2x multiplier, 10s max)
 > - Dead Letter Queue: failed messages go to `{topic}.DLQ`
 > - Consumers throw `RuntimeException` on failures to trigger the DLQ mechanism
+>
+> **Per-consumer behavior on failure:**
+> - `KafkaAuditConsumer`: `@Transactional` — INSERT fails → rollback → offset not committed → automatic retry
+> - `KafkaEventConsumer` (websocket-gateway): throws `RuntimeException("Failed to process Kafka message, throwing to trigger DLQ")`
+> - `TelephonyService.handleAssignment()`: throws `RuntimeException("Telephony session not found")` if session missing → Kafka retry
+> - `AnalyticsEventConsumer`: `if (tenantId == null) return` — **silent drop**, no retry
 
 ---
 
@@ -250,19 +262,19 @@ Quick-fire answers to every question an interviewer will ask about this project.
 > **Setup:** During testing, I noticed that after hitting F5 to refresh, my agent status kept flickering between OFFLINE and BUSY indefinitely, even though I wasn't on any call.
 >
 > **Investigation:** I pulled logs from three services simultaneously — agent-state-service, call-service, and routing-service — and correlated them by timestamp. I found a repeating cycle every ~10 seconds:
-> 1. `agent-state-service`: AGENT_DISCONNECTED (heartbeat timeout)
-> 2. `call-service`: "Requeuing call for disconnected agent"
-> 3. `routing-service`: "Assignment cache hit — returning AG_001"
-> 4. `agent-state-service`: "Agent AG_001 assigned to call" → BUSY
-> 5. Back to step 1
+> 1. `AgentStateService.detectDisconnects()`: AGENT_DISCONNECTED published
+> 2. `CallService.handleAgentDisconnect()`: "Requeuing call for disconnected agent" (`newCall: false`)
+> 3. `RoutingEngine.assignAgent()`: cache key `routing:assignment:call:{id}` hit → returned `AG_001` without checking if online
+> 4. `AgentStateService.handleRoutingEvent()`: accepted ASSIGNED → forced OFFLINE → BUSY
+> 5. Back to step 1 — infinite loop
 >
-> **Root Cause:** A race condition between three services. The routing service's idempotency cache remembered the old assignment and blindly returned it without checking if the agent was still online. The agent-state-service accepted the ASSIGNED event even though the agent was OFFLINE, which forced them back to BUSY.
+> **Root cause:** `RoutingEngine` trusted `routing:assignment:call:{callId}` without validating the cached agent's live Redis status. This is a specific failure of the "cache-as-truth" anti-pattern in distributed systems.
 >
-> **Fix:** Two defensive layers:
-> 1. **Routing engine** — Before trusting the idempotency cache, verify the agent's current Redis state. If offline, invalidate the cache and re-route
-> 2. **Agent state service** — Reject any ASSIGNED event when the agent is OFFLINE (defense in depth)
+> **Fix — two exact code locations:**
+> 1. **`RoutingEngine.assignAgent()`:** On cache hit, read `tenant:{id}:agent:{agentId}:state` hash field `status`. If `"OFFLINE"` → `DEL routing:assignment:call:{callId}` → re-run Lua script
+> 2. **`AgentStateService.handleRoutingEvent()`:** Added: `if (agent.getStatus() == OFFLINE) { log.warn("Ignoring routing event... Breaking the ping-pong loop."); return; }`
 >
-> **Lesson:** In distributed systems, every cache must be validated against the source of truth before being trusted. "At-least-once" delivery combined with caching can create infinite loops if the cache doesn't account for state changes that happened after the cache was written.
+> **Lesson:** In distributed systems, every cache must be validated against the live state before being trusted. "At-least-once" delivery combined with a stale cache creates infinite retry loops. Defense in depth matters — fix it at both the producer (routing) and consumer (agent-state) side.
 
 ---
 
@@ -296,12 +308,54 @@ Quick-fire answers to every question an interviewer will ask about this project.
 | JWT generation | `shared-common/.../util/JwtUtil.java` |
 | Agent state machine | `agent-state-service/.../service/AgentStateService.java` |
 | Routing Lua script | `routing-service/.../engine/RoutingEngine.java` |
+| Routing Kafka consumer | `routing-service/.../kafka/KafkaMessaging.java` |
 | Retry processor | `routing-service/.../service/RetryProcessor.java` |
 | Queue manager | `routing-service/.../service/QueueManager.java` |
 | Call lifecycle | `call-service/.../service/CallService.java` |
 | Agent disconnect recovery | `call-service/.../kafka/AgentEventConsumer.java` |
 | Twilio bridge logic | `telephony-service/.../service/TelephonyService.java` |
-| WebSocket auth | `websocket-gateway/.../config/AuthChannelInterceptor.java` |
+| Twilio webhook controller | `telephony-service/.../controller/TelephonyController.java` |
+| WebSocket config | `websocket-gateway/.../config/WebSocketConfig.java` |
+| WebSocket auth interceptor | `websocket-gateway/.../config/AuthChannelInterceptor.java` |
 | Kafka → browser push | `websocket-gateway/.../kafka/KafkaEventConsumer.java` |
+| Analytics Kafka consumer | `analytics-service/.../kafka/AnalyticsEventConsumer.java` |
+| Analytics counter service | `analytics-service/.../service/AnalyticsService.java` |
+| Audit Kafka consumer | `audit-service/.../kafka/KafkaAuditConsumer.java` |
 | Frontend state machine | `minigenesys-dashboard/.../services/session-state.service.ts` |
 | Kafka error handling | `shared-common/.../config/KafkaConfig.java` |
+
+---
+
+## ⚡ Critical Method Names (Say These in Interviews)
+
+| Service | Entry Point | Key Method | What It Does |
+|---|---|---|---|
+| agent-state-service | `POST /agents/{id}/login` | `AgentStateService.changeState()` | Dual-write: PG + Redis, publishes to `agent-events` |
+| agent-state-service | `POST /agents/{id}/heartbeat` | `AgentStateService.handleHeartbeat()` | `SETEX heartbeatKey 30000ms` |
+| agent-state-service | `@Scheduled` | `AgentStateService.detectDisconnects()` | PG query → OFFLINE transition → `AGENT_DISCONNECTED` |
+| agent-state-service | Kafka: `routing-events` | `AgentStateService.handleRoutingEvent()` | Sets BUSY; **returns early if OFFLINE** (ping-pong fix) |
+| agent-state-service | Kafka: `call-lifecycle-events` | `AgentStateService.handleCallCompletion()` | Sets AVAILABLE, re-adds to ZADD skill sets |
+| call-service | `POST /calls` | `CallService.createCall()` | INSERT call QUEUED + publish `call-events` |
+| call-service | Kafka: `routing-events` | `CallService.handleRoutingEvent()` | Updates call status: ROUTED / NO_AGENT / ABANDONED |
+| call-service | Kafka: `agent-events` | `CallService.handleAgentDisconnect()` | Requeues call with `newCall: false` |
+| routing-service | Kafka: `call-events` | `KafkaMessaging.consumeCallEvent()` → `routingEngine.assignAgent()` | Lock → Lua → publish |
+| telephony-service | `POST /twilio/inbound` | `TelephonyController.handleInbound()` → `TelephonyService.handleInboundCall()` | Idempotency check → REST createCall → PG session INSERT |
+| telephony-service | `GET /twilio/bridge` | `TelephonyService.getBridgeTwiml()` | Returns `<Dial><Client>` or polls |
+| telephony-service | Kafka: `routing-events` | `TelephonyService.handleAssignment()` | Sets `assignedAgentId` in session [PG UPDATE] |
+| websocket-gateway | STOMP CONNECT | `AuthChannelInterceptor.preSend()` | JWT validation + `sessionAttributes.put("tenantId")` |
+| websocket-gateway | Kafka: 4 topics | `KafkaEventConsumer.consume()` | `readTree()` → extract tenantId → `convertAndSend()` |
+| analytics-service | Kafka: 4 topics | `AnalyticsEventConsumer.consume()` | switch(topic) → dispatch to specific handler → `updateMetric()` |
+| audit-service | Kafka: 5 topics | `KafkaAuditConsumer.consume()` [@Transactional] | Parse → extract metadata → `auditRepository.save()` |
+
+---
+
+## 🔄 Kafka Consumer Group Map
+
+| Topic | Consumers (by group) |
+|---|---|
+| `call-events` | routing-service-group, analytics-service-group, audit-service-group, websocket-gateway-group |
+| `routing-events` | agent-state-service-group, call-service-group, telephony-service-group, analytics-service-group, audit-service-group, websocket-gateway-group |
+| `agent-events` | analytics-service-group, audit-service-group, websocket-gateway-group |
+| `call-lifecycle-events` | agent-state-service-group, analytics-service-group, audit-service-group, websocket-gateway-group |
+| `user-events` | audit-service-group only |
+| `telephony-events` | **nobody** (published for future use) |

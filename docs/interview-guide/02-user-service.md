@@ -105,15 +105,9 @@ Creates an agent account AND provisions their agent profile in agent-state-servi
 
 ## 5. Kafka Usage
 
-### Produced Topics
+**None — the user-service does not publish or consume any Kafka topics.**
 
-| Topic | When | Payload |
-|---|---|---|
-| `user-events` | After successful login or user creation | Event with userId, tenantId, eventType |
-
-### Consumed Topics
-
-**None.** The user-service is a pure producer — it doesn't react to any events from other services.
+> **Correction note:** Earlier documentation stated that `user-events` is produced by user-service. After reviewing the actual `UserService.java` source code, there is no `KafkaTemplate` or any Kafka dependency in user-service. The `user-events` topic and `KafkaAuditConsumer` references in the audit-service documentation may refer to a planned feature or a different service. The `UserService` class contains only: `createSupervisor()`, `createAgent()`, `createAgentProfileInStateService()`, and `login()` — none of which publish to Kafka.
 
 ---
 
@@ -172,26 +166,73 @@ The `linkedAgentId` field is the **bridge** between the user-service world and t
 
 | Direction | Service | How | Why |
 |---|---|---|---|
-| **Calls →** | Agent State Service | REST `POST /api/v1/agents/internal` | When creating an agent user, it provisions the agent profile (with skills) in agent-state-service |
+| **Calls →** | Agent State Service | `RestTemplate.postForEntity(agentStateServiceUrl, entity, String.class)` via `createAgentProfileInStateService()` | When creating an agent user, provisions the agent profile (with skills) in agent-state-service |
 | **Called by ←** | API Gateway | HTTP proxy | Gateway forwards login and user creation requests |
-| **Shares →** | `shared-common` (JwtUtil) | Compile-time dependency | Both the user-service and api-gateway use the same `JwtUtil` class and the same HMAC secret to generate and validate tokens |
+| **Shares →** | `shared-common` (JwtUtil) | Compile-time dependency | Both user-service and api-gateway use the same `JwtUtil` class and HMAC secret |
 
-### Cross-Service Agent Provisioning Flow
+### Cross-Service Agent Provisioning Flow (Exact Methods)
 
 ```
-UserService.createAgent()
-  │
-  ├── 1. POST to agent-state-service/api/v1/agents/internal
-  │       Headers: X-Tenant-Id, X-Internal-Key (shared secret)
-  │       Body: { agentId, name, skills }
-  │       → Creates the agent record in agent-state-service's DB
-  │       → Creates the agent record in Redis
-  │
-  └── 2. INSERT into local users table
-          { username, passwordHash, role=AGENT, linkedAgentId }
+Browser: POST /api/v1/users/agents   (Supervisor's JWT in Authorization header)
+→ API Gateway: JwtAuthenticationFilter.filter()
+    checks role == SUPERVISOR? → allows /api/v1/users/**
+    injects X-Tenant-Id from JWT claims
+→ UserController.createAgent(@RequestHeader("X-Tenant-Id") tenantId, @RequestBody request)
+→ UserService.createAgent(request, tenantId)
+
+    Step 1: UserService.createAgent()
+    → userRepository.existsByUsername(request.getUsername())
+        if true → throw 409 CONFLICT
+
+    Step 2: UserService.createAgentProfileInStateService(request, tenantId)
+    → builds HttpHeaders:
+        headers.set("X-Tenant-Id", tenantId)
+        headers.set("X-Internal-Key", internalKey)   // shared secret, bypasses JWT
+    → builds body map: { agentId, name, skills }
+    → restTemplate.postForEntity(
+          "http://localhost:8086/api/v1/agents/internal",
+          HttpEntity(body, headers),
+          String.class
+      )
+    → agent-state-service: AgentStateController.createAgent()
+          checks X-Internal-Key validity
+          AgentStateService.createAgent() → agentRepository.save() [PG: status=OFFLINE]
+    → if response not 2xx → throws RuntimeException → propagated as 500
+
+    Step 3 (only if Step 2 succeeded):
+    → userRepository.save(User { tenantId, username, passwordHash, role=AGENT, linkedAgentId })
+    → returns 201 CREATED
+
+    If Step 2 fails: Step 3 never runs (@Transactional rolls back), user NOT created.
+    This is a simple distributed fail-fast pattern (no formal saga).
 ```
 
-If step 1 fails (agent-state-service is down), step 2 never executes, and the whole operation returns `500 INTERNAL_SERVER_ERROR`. This is a simple form of distributed transaction management (fail-fast), though it lacks a formal saga pattern.
+### Login → JWT → Gateway Flow (Exact Methods)
+
+```
+Browser: POST /api/v1/auth/login  { username, password }
+→ API Gateway: JwtAuthenticationFilter.isSecured("/api/v1/auth/login")
+    → OPEN_ENDPOINTS contains "/api/v1/auth/login" → returns false
+    → filter skips all JWT checks, calls chain.filter() directly
+→ UserController.login(@RequestBody AuthRequest)
+→ UserService.login(request)
+    → userRepository.findByUsername(request.getUsername())
+        if empty → throw 401 UNAUTHORIZED
+    → passwordEncoder.matches(request.getPassword(), user.getPasswordHash())
+        BCrypt comparison
+        if false → throw 401 UNAUTHORIZED
+    → jwtUtil.generateToken(
+          user.getId().toString(),    // becomes JWT "sub" claim
+          user.getTenantId(),          // embedded as "tenantId" claim
+          user.getRole().name(),       // embedded as "role" claim
+          user.getLinkedAgentId()      // embedded as "agentId" claim
+      )
+    → returns AuthResponse { accessToken, userId, tenantId, role, agentId }
+
+Browser stores token in localStorage.
+Every subsequent request includes: Authorization: Bearer <token>
+API Gateway validates via JwtAuthenticationFilter.filter() → never hits user-service again.
+```
 
 ---
 
