@@ -80,7 +80,7 @@ public class AgentStateService {
         }
 
         agent = agentRepository.save(agent);
-        updateRedisState(agent, oldStatus, newStatus);
+        updateRedisState(agent, newStatus);
         publishEvent(agent, oldStatus, newStatus, "AGENT_" + newStatus.name());
 
         return mapToResponse(agent);
@@ -132,7 +132,7 @@ public class AgentStateService {
             agent.setActiveCallId(null);
             agentRepository.save(agent);
 
-            updateRedisState(agent, oldStatus, AgentStatus.OFFLINE);
+            updateRedisState(agent, AgentStatus.OFFLINE);
             publishEvent(agent, oldStatus, AgentStatus.OFFLINE, "AGENT_DISCONNECTED");
 
             // Explicitly delete heartbeat key
@@ -179,7 +179,7 @@ public class AgentStateService {
         agentRepository.save(agent);
 
         // Update Redis (Ensuring consistency with routing-service direct mutation)
-        updateRedisState(agent, oldStatus, AgentStatus.BUSY);
+        updateRedisState(agent, AgentStatus.BUSY);
 
         // Publish agent-events
         publishEvent(agent, oldStatus, AgentStatus.BUSY, "AGENT_BUSY");
@@ -207,7 +207,7 @@ public class AgentStateService {
         agentRepository.save(agent);
 
         // Update Redis (Release agent)
-        updateRedisState(agent, oldStatus, AgentStatus.AVAILABLE);
+        updateRedisState(agent, AgentStatus.AVAILABLE);
 
         // Publish agent-events
         publishEvent(agent, oldStatus, AgentStatus.AVAILABLE, "AGENT_AVAILABLE");
@@ -232,7 +232,7 @@ public class AgentStateService {
         return false;
     }
 
-    private void updateRedisState(Agent agent, AgentStatus oldStatus, AgentStatus newStatus) {
+    private void updateRedisState(Agent agent, AgentStatus newStatus) {
         String stateKey = String.format(AGENT_STATE_KEY_TPL, agent.getTenantId(), agent.getId());
 
         // Always update the state hash
