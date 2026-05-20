@@ -27,10 +27,18 @@ Browser                    API Gateway (8080)           User Service (8081)
   │  Navigate to /dashboard      │                            │
 ```
 
-**What happens in code:**
-- `UserService.authenticate()` validates credentials against PostgreSQL `users` table
-- JWT is signed with a shared secret, contains `tenantId` and `role` claims
-- Frontend stores the token in `localStorage` and attaches it to every subsequent request via `ApiService`
+**Granular Code Tracing:**
+- **API Endpoint:** `POST /api/v1/auth/login` (Forwarded by API Gateway to `user-service`).
+  - *Purpose:* Authenticate supervisor, locate tenant context, and return JWT for secure REST and WebSocket operations.
+- **Method Called:** `UserService.authenticate(request)`
+  - *Purpose:* Entrypoint for user validation.
+- **PostgreSQL Read (Performed by User Service):** `SELECT * FROM users WHERE username = ?` via `UserRepository.findByUsername()`
+  - *Purpose:* Fetches stored credentials (hashed password, salt, role, and tenantId).
+- **Security Check (Performed by User Service):** `BCrypt.matches(password, storedHash)`
+  - *Purpose:* Cryptographically matches the client-supplied password against the hashed value.
+- **State/Token Generation (Performed by User Service):** JWT signing (stateless session generation).
+  - *Purpose:* Constructs JWT claims containing `userId`, `tenantId`, and `role: SUPERVISOR` so subsequent components can skip database queries.
+- **Frontend Action:** Stores token in `localStorage`, updates routing guards, and calls `ApiService` to fetch initial UI frames.
 
 **Supervisor vs Agent difference:**
 - Supervisors see analytics dashboards and agent monitoring
@@ -69,16 +77,24 @@ Browser                  API Gateway         Agent State Service        Redis   
   │ (every 15 seconds)       │                       │                    │                  │
 ```
 
-**What happens in code:**
-1. `AgentStateService.changeState()` validates the transition `OFFLINE → AVAILABLE`
-2. `updateRedisState()` writes the agent's state hash and adds them to skill-based sorted sets
-3. `publishEvent()` sends `AGENT_AVAILABLE` to Kafka `agent-events` topic
-4. Frontend's `SessionStateService.startHeartbeat()` begins sending pings every 15 seconds
-
-**Redis keys created:**
-- `tenant:tenant1:agent:AG_001:state` → Hash `{status: AVAILABLE, lastAssignedTime: ...}`
-- `tenant:tenant1:skill:sales:available` → Sorted Set, member `AG_001` scored by lastAssignedTime
-- `tenant:tenant1:agent:AG_001:heartbeat` → String with TTL 30s
+**Granular Code Tracing:**
+- **API Endpoint:** `POST /api/v1/agents/{agentId}/login` (Targeting `agent-state-service`).
+  - *Purpose:* Signals system to register this agent as ready to take inbound calls.
+- **Method Called:** `AgentStateService.changeState(agentId, AgentStatus.OFFLINE, AgentStatus.AVAILABLE)`
+  - *Purpose:* Core business logic processor. Checks constraints to ensure valid status state-machine pathing.
+- **PostgreSQL Write (Performed by Agent State Service):** `UPDATE agents SET status = 'AVAILABLE' WHERE id = 'AG_001'` (via `AgentRepository.save()`)
+  - *Purpose:* Persists agent state durably for audits, compliance reports, and supervisor lookups.
+- **Redis Write (State Cache - Performed by Agent State Service):** `HSET tenant:tenant1:agent:AG_001:state status "AVAILABLE"`
+  - *Purpose:* Fast in-memory state store for routing engine to query.
+- **Redis Write (Skill Sets - Performed by Agent State Service):** `ZADD tenant:tenant1:skill:sales:available {epochMs} AG_001`
+  - *Purpose:* Registers agent under each of their skill queues. The score (`epochMs` of shift start) implements the Least-Recently-Used (LRU) routing policy.
+- **Redis Write (Heartbeat - Performed by Agent State Service via subsequent Heartbeat API):** `SET tenant:tenant1:agent:AG_001:heartbeat {now} EX 30` (or `PX 30000`)
+  - *Purpose:* Sets a TTL-bound token to identify that the agent is actively connected. The login response triggers the client to start sending periodic `/heartbeat` requests, which perform this write.
+- **Kafka Publish (Performed by Agent State Service):** Publishes `AGENT_AVAILABLE` payload to `agent-events` topic.
+  - *Purpose:* Triggers downstream actions:
+    - **Dashboard Updates:** Consumed by `websocket-gateway` to push the agent's new status to the supervisor's live monitoring panel.
+    - **Analytics Counters:** Consumed by `analytics-service` to decrement the offline count and increment the available agents count in PostgreSQL counters.
+- **Frontend Action:** Starts browser-based interval (`SessionStateService.startHeartbeat()`) sending `POST /agents/AG_001/heartbeat` every 15s.
 
 ---
 
@@ -87,10 +103,16 @@ Browser                  API Gateway         Agent State Service        Redis   
 **Trigger:** Agent clicks "Set Ready" after completing a call (transitions from `BUSY → AVAILABLE`).
 
 This is identical to the login flow but with a different state transition:
-- `AgentStateService.changeState(BUSY → AVAILABLE)` is called
-- Agent is re-added to the Redis skill sorted sets (making them routable again)
-- `AGENT_AVAILABLE` event published to Kafka
-- WebSocket pushes the status change to the browser
+- **API Endpoint:** `POST /api/v1/agents/{agentId}/available` (Targeting `agent-state-service`).
+  - *Purpose:* Transition agent state back to routable status.
+- **Method Called:** `AgentStateService.changeState(agentId, AgentStatus.BUSY, AgentStatus.AVAILABLE)`
+  - *Purpose:* Validates state transition.
+- **PostgreSQL Write (Performed by Agent State Service):** `UPDATE agents SET status = 'AVAILABLE', active_call_id = NULL WHERE id = 'AG_001'`
+  - *Purpose:* Clears call reference and sets status to AVAILABLE.
+- **Redis Write (State Cache - Performed by Agent State Service):** `HSET tenant:tenant1:agent:AG_001:state status "AVAILABLE"`
+- **Redis Write (Skill Sets - Performed by Agent State Service):** `ZADD tenant:tenant1:skill:sales:available {epochMs} AG_001` (makes agent routable again)
+- **Kafka Publish (Performed by Agent State Service):** Sends `AGENT_AVAILABLE` event to Kafka.
+  - *Purpose:* Updates supervisor console via `websocket-gateway` and changes status counts in `analytics-service`.
 
 **Important:** This transition normally happens **automatically** when the `call-lifecycle-events` topic delivers a `CALL_COMPLETED` event. The `AgentStateService.handleCallCompletion()` method handles this.
 
@@ -135,10 +157,24 @@ Twilio                   Telephony Service       Call Service            Kafka
   │     + Redirect to /bridge │                       │                    │
 ```
 
-**What happens in code:**
-- `CallService.createCall()` persists the call with `status = QUEUED`
-- `CallEventProducer.publishCallEvent()` sends the call to `call-events` Kafka topic
-- The call-event contains `callId`, `tenantId`, `requiredSkills`, `priority`, and `isNew: true`
+**Granular Code Tracing:**
+- **API Endpoint (Simulated):** `POST /api/v1/calls` (Targeting `call-service`).
+  - *Purpose:* Generates a simulated inbound call for routing testing.
+- **API Endpoint (Real Call):** `POST /twilio/inbound` (Targeting `telephony-service`).
+  - *Purpose:* Receives Twilio's incoming call webhook parameters.
+- **Method Called (Call Service):** `CallService.createCall(CallRequest)`
+  - *Purpose:* Validates skills exist, generates a new call UUID, sets initial status to `QUEUED`, and schedules routing.
+- **Method Called (Telephony):** `TelephonyService.createInternalCall()`
+  - *Purpose:* Makes an internal REST call to `POST /api/v1/calls` on the Call Service.
+- **PostgreSQL Write (Call Service):** `INSERT INTO calls (id, tenant_id, status, required_skills, priority) VALUES (?, ?, 'QUEUED', ?, ?)`
+  - *Purpose:* Creates the master source-of-truth call record in the `minigenesys_call` database.
+- **PostgreSQL Write (Telephony Service):** `INSERT INTO telephony_call_sessions (id, internal_call_id, twilio_call_sid, status) VALUES (?, ?, ?, 'RINGING')`
+  - *Purpose:* Maps Twilio's external `CallSid` to the internal call UUID in the `minigenesys_telephony` database.
+- **Kafka Publish (Performed by Call Service):** Sends a payload to the `call-events` topic containing `{callId, tenantId, requiredSkills, priority, newCall: true}`.
+  - *Purpose:* Launches async matching and updates downstream telemetry:
+    - **Trigger Routing:** It triggers `routing-service`'s `consumeCallEvent()` to run the Lua script matching logic and assign an available agent immediately.
+    - **Trigger Dashboards:** It triggers `websocket-gateway` to broadcast the call to the supervisor dashboard.
+    - **Trigger Analytics:** It triggers `analytics-service` to increment `totalCalls` and `queuedCalls` in PostgreSQL counters.
 
 ---
 
@@ -183,20 +219,33 @@ Kafka              Routing Service                    Redis                   Ka
   │                     │──────────────────────────────►│                        │
 ```
 
-**The Lua Script (atomic operation):**
-The `SELECT_AGENT_LUA` script in `RoutingEngine.java` does all of this in one atomic Redis operation:
-1. `ZINTERSTORE` — intersects all skill sorted sets to find agents matching ALL required skills
-2. `ZRANGE ... 0 0` — picks the agent with the lowest score (least recently used)
-3. `ZREM` — removes the agent from all skill sets (so no other call can grab them)
-4. `HSET` — marks the agent as BUSY in their state hash
-
-**Downstream effects (via Kafka consumers):**
-- `agent-state-service` consumes `routing-events` → updates PostgreSQL agent record to BUSY
-- `call-service` consumes `routing-events` → updates call status to ROUTED
-- `telephony-service` consumes `routing-events` → stores the assigned agent ID for Twilio bridging
-- `websocket-gateway` consumes `routing-events` → pushes `CALL_ASSIGNED` to the agent's browser
-- `analytics-service` consumes `routing-events` → increments routed call counter
-- `audit-service` consumes `routing-events` → persists the event as an audit record
+**Granular Code Tracing:**
+- **Kafka Consume:** `RoutingEventConsumer` receives the `call-events` message.
+- **Method Called:** `RoutingService.processCallRouting(CallEvent)` -> `RoutingEngine.assignAgent(CallRequest)`
+  - *Purpose:* Decides whether to assign the call or buffer it based on agent availability.
+- **Redis Write (Lock Acquisition - Performed by Routing Service):** `SET routing:lock:call:{callId} "locked" NX PX 10000`
+  - *Purpose:* Implements a distributed lock to prevent multiple instances of `routing-service` from routing the same call concurrently.
+- **Redis Read (Idempotency Check - Performed by Routing Service):** `GET routing:assignment:call:{callId}`
+  - *Purpose:* Verifies whether this call has already been assigned during a previous retry or redelivery.
+- **Redis Write (Lua script - Performed by Routing Service):** Executes `SELECT_AGENT_LUA` atomically.
+  - *Actions performed in Lua:*
+    1. `ZINTERSTORE` — intersects all required skill sets `tenant:{tenantId}:skill:{skill}:available` to locate agents matching ALL skills.
+    2. `ZRANGE ... 0 0` — picks the member with the lowest score (the Least-Recently-Used agent).
+    3. `ZREM` — removes the selected agent from all skill availability sorted sets.
+    4. `HSET` — transitions the agent's cached status to `BUSY` in `tenant:{tenantId}:agent:{agentId}:state`.
+- **PostgreSQL Write (Performed by Routing Service):** `INSERT INTO assignments (id, call_id, agent_id, status, assigned_at) VALUES (?, ?, ?, 'ASSIGNED', ?)`
+  - *Purpose:* Durably records the routing decision in the `minigenesys_routing` database.
+- **Redis Write (Cache Assignment - Performed by Routing Service):** `SET routing:assignment:call:{callId} {agentId} EX 3600`
+  - *Purpose:* Caches the routing mapping for 1 hour to handle future idempotency checks.
+- **Redis Write (Release Lock - Performed by Routing Service):** `DEL routing:lock:call:{callId}`
+  - *Purpose:* Unlocks the call resource.
+- **Kafka Publish (Performed by Routing Service):** Sends a payload to the `routing-events` topic containing `{callId, agentId, tenantId, status: ASSIGNED}`.
+  - *Purpose:* Triggers parallel state synchronization across 5 downstream services:
+    - `agent-state-service` consumes event → marks agent `BUSY` in PG & Redis.
+    - `call-service` consumes event → marks call `ROUTED` and stores `assignedAgentId` in PG.
+    - `telephony-service` consumes event → maps agent ID to the Twilio session.
+    - `websocket-gateway` consumes event → pushes live incoming call panel updates to the agent browser.
+    - `analytics-service` consumes event → increments `routedCalls` and decrements `queuedCalls` in PG.
 
 ---
 
@@ -238,22 +287,30 @@ Routing Service              Redis (QueueManager)          RetryProcessor (sched
   │                               │◄─────────────────────────────│
 ```
 
-**Fibonacci Backoff Delays:**
-```
-Retry 0: 1 second
-Retry 1: 1 second
-Retry 2: 2 seconds
-Retry 3: 3 seconds
-Retry 4: 5 seconds
-Retry 5: 8 seconds
-Retry 6: 13 seconds
-Retry 7: 21 seconds
-Retry 8: 30 seconds
-Retry 9: 30 seconds
-Total:   ~114 seconds before ABANDONED
-```
-
-**Important behavior:** If the retry gets `NO_AGENT` for a tenant, it `break`s out of the loop for that tenant — because if the highest-priority call can't find an agent, lower-priority calls won't either.
+**Granular Code Tracing:**
+- **Method Called (Enqueue):** `QueueManager.enqueue(CallRequest)`
+  - *Purpose:* Places the unassigned call into the retry buffer.
+- **Redis Write (Retry Queue - Performed by Routing Service):** `ZADD tenant:{tenantId}:call:queue {score} {callId}`
+  - *Purpose:* Buffers the call in a priority-sorted set where the score represents next allowable processing epoch (incorporating Fibonacci backoff).
+- **Redis Write (Call Payload - Performed by Routing Service):** `SET tenant:{tenantId}:call:{callId} {jsonPayload}`
+  - *Purpose:* Caches call matching properties so retry workers do not have to perform slow relational SQL queries.
+- **Redis Write (Active Tenants - Performed by Routing Service):** `SADD routing:active-tenants {tenantId}`
+  - *Purpose:* Registers this tenant in a set of active queues so the background polling loops know to scan them.
+- **Method Called (Scheduler):** `@Scheduled(fixedDelay = 5000) RetryProcessor.processQueuedCalls()`
+  - *Purpose:* Periodic job that scans all active tenants in Redis and processes eligible calls.
+- **Redis Read (Performed by Routing Service):** `ZRANGEBYSCORE tenant:{tenantId}:call:queue -inf {now}`
+  - *Purpose:* Grabs all calls whose backoff delays have expired.
+- **Method Called (Re-route):** `RoutingEngine.assignAgent()`
+  - *Purpose:* Attempts to execute Lua script matching on the active call.
+- **Branch: Failure (retryCount < 10):**
+  - **Redis Write (Performed by Routing Service):** Updates the score in `tenant:{tenantId}:call:queue` with the next backoff timestamp and increments the retry counter.
+  - **Kafka Publish (Performed by Routing Service):** Publishes `NO_AGENT` status on `routing-events` topic. Consumed by `call-service` to log routing attempts and updated in dashboards.
+- **Branch: Success:**
+  - **Redis Delete (Performed by Routing Service):** `ZREM tenant:{tenantId}:call:queue {callId}` and `DEL tenant:{tenantId}:call:{callId}`.
+  - **Kafka Publish (Performed by Routing Service):** Publishes `ASSIGNED` on `routing-events` topic.
+- **Branch: Abandoned (retryCount >= 10, elapsed ~114s):**
+  - **Redis Delete (Performed by Routing Service):** Deletes call queue key and payload key.
+  - **Kafka Publish (Performed by Routing Service):** Publishes `ABANDONED` on `routing-events` topic. Consumed by `call-service` to update database status to `ABANDONED` and trigger completion logic.
 
 ---
 
@@ -296,9 +353,29 @@ Browser         API Gateway      Call Service              Kafka              Ag
   │                 │                 │                      │   Publish AGENT_AVAILABLE
   │                 │                 │                      │◄──────────────────────│
   │                 │                 │                      │               agent-events
-  │ ◄── WebSocket: CALL_COMPLETED ───│                      │                       │
-  │ ◄── WebSocket: AGENT_AVAILABLE ──│                      │                       │
 ```
+
+**Granular Code Tracing:**
+- **API Endpoint (Start):** `POST /api/v1/calls/{callId}/start` (Targeting `call-service`).
+  - *Purpose:* Transitions the call status to active conversation mode.
+- **Method Called (Start):** `CallService.startCall(callId)`
+  - *Purpose:* Validates status is currently `ROUTED` (preventing illegal starts).
+- **PostgreSQL Write (Start):** `UPDATE calls SET status = 'IN_PROGRESS', started_at = ? WHERE id = ?`
+  - *Purpose:* Persists the conversation start timestamp.
+- **API Endpoint (Complete):** `POST /api/v1/calls/{callId}/complete` (Targeting `call-service`).
+  - *Purpose:* Ends the call and clears references.
+- **Method Called (Complete):** `CallService.completeCall(callId)`
+  - *Purpose:* Validates status is currently `IN_PROGRESS`.
+- **PostgreSQL Write (Complete):** `UPDATE calls SET status = 'COMPLETED', ended_at = ? WHERE id = ?`
+  - *Purpose:* Records the conversation completion.
+- **Kafka Publish (Lifecycle Event - Performed by Call Service):** Sends a payload to the `call-lifecycle-events` topic containing `{callId, agentId, tenantId, status: CALL_COMPLETED}`.
+  - *Purpose:* Signals that the agent handling this call is now free:
+    - Consumed by `agent-state-service`'s `CallLifecycleConsumer.handleCallCompletion(event)`.
+    - **Method Called:** `AgentStateService.changeState(agentId, AgentStatus.BUSY, AgentStatus.AVAILABLE)`.
+    - **PostgreSQL Write (Performed by Agent State Service):** `UPDATE agents SET status = 'AVAILABLE', active_call_id = NULL WHERE id = ?`.
+    - **Redis Write (State Cache - Performed by Agent State Service):** `HSET tenant:{tenantId}:agent:{agentId}:state status "AVAILABLE"`
+    - **Redis Write (Skill Sets - Performed by Agent State Service):** `ZADD tenant:{tenantId}:skill:{skill}:available {epochMs} {agentId}` (LRU re-insertion).
+    - **Kafka Publish (Performed by Agent State Service):** Sends `AGENT_AVAILABLE` payload to `agent-events` topic. Consumed by analytics and websocket gateways.
 
 **Call Status State Machine:**
 ```
@@ -308,8 +385,8 @@ QUEUED → ROUTED → IN_PROGRESS → COMPLETED
 ```
 
 - `QUEUED → ROUTED`: Set by call-service when it consumes an `ASSIGNED` routing-event
-- `ROUTED → IN_PROGRESS`: Set by `CallService.updateCallStatus()` (REST call from browser or Twilio)
-- `IN_PROGRESS → COMPLETED`: Set by `CallService.updateCallStatus()`
+- `ROUTED → IN_PROGRESS`: Set by `CallService.startCall()` (REST call from browser or Twilio)
+- `IN_PROGRESS → COMPLETED`: Set by `CallService.completeCall()`
 
 ---
 
@@ -334,6 +411,28 @@ Browser              API Gateway      Agent State Service         Call Service
   │                      │                    │                        │ Publish call-events
   │ ◄── { status: QUEUED } ───────────────────┼────────────────────────│
 ```
+
+**Granular Code Tracing:**
+- **API Endpoint 1:** `POST /api/v1/agents/{agentId}/logout` (Targeting `agent-state-service`).
+  - *Purpose:* Log agent out immediately to avoid instant re-assignment to the same call.
+- **Method Called (Logout):** `AgentStateService.changeState(agentId, AgentStatus.AVAILABLE, AgentStatus.OFFLINE)`
+  - *Purpose:* Enforces agent shift completion.
+- **PostgreSQL Write (Agent Logout - Performed by Agent State Service):** `UPDATE agents SET status = 'OFFLINE' WHERE id = ?`
+  - *Purpose:* Durably marks the agent offline.
+- **Redis Write (Agent Logout - Performed by Agent State Service):**
+  - `DEL tenant:{tenantId}:agent:{agentId}:state` (clears state cache).
+  - `ZREM tenant:{tenantId}:skill:{skill}:available {agentId}` (removes from all routing lists).
+  - *(Note: The heartbeat key `tenant:{tenantId}:agent:{agentId}:heartbeat` is not deleted by the server on normal logout, but will expire naturally within 30s as the frontend stops sending updates.)*
+- **API Endpoint 2:** `POST /api/v1/calls/{callId}/status` with body `{ "status": "REJECTED" }` (Targeting `call-service`).
+  - *Purpose:* Returns the call to the queue.
+- **Method Called (Rejection):** `CallService.rejectCall(callId)`
+  - *Purpose:* Initiates requeuing and state release.
+- **PostgreSQL Write (Call Requeue - Performed by Call Service):** `UPDATE calls SET status = 'QUEUED', assigned_agent_id = NULL WHERE id = ?`
+  - *Purpose:* Resets call status back to queue.
+- **Kafka Publish (Requeue Event - Performed by Call Service):** Sends a payload to the `call-events` topic containing `{callId, tenantId, requiredSkills, priority, newCall: false}`.
+  - *Purpose:* Re-routes call without double-counting counters since `newCall: false` is supplied.
+- **Kafka Publish (Release Agent - Performed by Call Service):** Sends a payload to the `call-lifecycle-events` topic containing `{callId, agentId, tenantId, status: CALL_COMPLETED}`.
+  - *Purpose:* Guarantees the agent is released and state variables cleared.
 
 **Known Bug (Fixed):** Originally, the dashboard fired both REST calls simultaneously. Because Kafka processing is extremely fast, the call was requeued and immediately re-assigned back to the same agent before the `OFFLINE` status could be written to Redis. The dashboard now chains these calls sequentially, ensuring the agent is fully removed from routing queues before the call is requeued.
 
@@ -382,6 +481,29 @@ Time 30-40s: AgentStateService.detectDisconnects() runs (every 10s)
             and tries to find a new agent
 ```
 
+**Granular Code Tracing:**
+- **Method Called (Sweeper):** `@Scheduled(fixedRate = 10000) AgentStateService.detectDisconnects()`
+  - *Purpose:* Sweeps databases to clean up dead sessions.
+- **PostgreSQL Read (Agent State DB - Performed by Agent State Service):** `SELECT * FROM agents WHERE status IN ('AVAILABLE', 'BUSY') AND last_heartbeat_at < ?`
+  - *Purpose:* Fetches all agents whose heartbeats have timed out (> 30s delay).
+- **PostgreSQL Write (Agent State DB - Performed by Agent State Service):** `UPDATE agents SET status = 'OFFLINE', last_heartbeat_at = ? WHERE id = ?`
+  - *Purpose:* Marks the disconnected agent offline.
+- **Redis Write (Cleanup - Performed by Agent State Service):**
+  - `DEL tenant:{tenantId}:agent:{agentId}:state`
+  - `ZREM tenant:{tenantId}:skill:{skill}:available {agentId}` (removes from matching pools)
+  - `DEL tenant:{tenantId}:agent:{agentId}:heartbeat`
+- **Kafka Publish (Disconnect - Performed by Agent State Service):** Sends `AGENT_DISCONNECTED` payload on the `agent-events` topic.
+  - *Purpose:* Initiates orphaned call recovery.
+- **Kafka Consume (Call Service):** `AgentEventConsumer.consumeAgentEvent()` receives the disconnect notification.
+- **Method Called (Call Service):** `CallService.handleAgentDisconnect(AgentEvent)`
+  - *Purpose:* Locates and rescues calls assigned to the disconnected agent.
+- **PostgreSQL Read (Call DB - Performed by Call Service):** `SELECT * FROM calls WHERE assigned_agent_id = ? AND status IN ('ROUTED', 'IN_PROGRESS')`
+  - *Purpose:* Locates active/ringing calls abandoned by the agent.
+- **PostgreSQL Write (Call DB - Performed by Call Service):** `UPDATE calls SET status = 'QUEUED', assigned_agent_id = NULL WHERE id = ?`
+  - *Purpose:* Returns orphaned calls back to a queue state.
+- **Kafka Publish (Re-route - Performed by Call Service):** Sends `call-events` with `newCall: false` payload.
+  - *Purpose:* Requeues calls to find a healthy agent without incrementing total statistics.
+
 **Known Bug (Fixed):** Before our fix, the routing-service's idempotency cache still remembered the old agent assignment. When the requeued call arrived, the cache would blindly re-assign it to the disconnected agent, creating an infinite ping-pong loop. The fix validates agent status before trusting the cache.
 
 ---
@@ -427,9 +549,21 @@ Phone Call          Twilio Cloud        Telephony Service      Call Service     
   │ ◄── Voice connected ─────────────── Agent's browser (WebRTC)   │                   │
 ```
 
-**Polling loop:** If the agent hasn't been assigned yet when Twilio hits `/bridge`, it returns TwiML that says "Your call is still in queue" with a 3-second pause and a redirect back to `/bridge`, creating a polling loop until an agent is assigned.
-
-**Token generation:** The agent's browser calls `GET /twilio/token?agentId=AG_001` to get a Twilio Access Token with a VoiceGrant, enabling WebRTC audio.
+**Granular Code Tracing:**
+- **API Endpoint 1:** `POST /api/v1/telephony/twilio/inbound` (Targeting `telephony-service`).
+  - *Purpose:* External webhook endpoint called by Twilio when a voice trunk receives an inbound call.
+- **Method Called (Telephony):** `TelephonyService.handleInboundCall()`
+  - *Purpose:* Calls `CallServiceClient.createInternalCall()` to trigger call registration in `call-service`, then persists the session.
+- **PostgreSQL Write (Telephony DB):** `INSERT INTO telephony_call_sessions (twilio_call_sid, internal_call_id, from_number, to_number, tenant_id, status) VALUES (?, ?, ?, ?, ?, 'ringing')`
+  - *Purpose:* Maps external Twilio telephony SID to internal call identifier.
+- **API Endpoint 2:** `GET /api/v1/telephony/twilio/bridge` with query parameter `callSid` (Targeting `telephony-service`).
+  - *Purpose:* Callback URL hit by Twilio instructions to connect/bridge audio.
+- **PostgreSQL Read (Telephony DB):** `SELECT * FROM telephony_call_sessions WHERE twilio_call_sid = ?`
+  - *Purpose:* Checks if an agent has been assigned.
+- **Branch: Agent unassigned:** Returns TwiML Redirect back to `/bridge` with a 3-second delay, implementing an audio waiting loop ("Please wait...").
+- **Branch: Agent assigned:** Returns TwiML `<Dial><Client>{agentId}</Client></Dial>` to route voice audio directly to the agent's WebRTC device.
+- **API Endpoint 3:** `GET /api/v1/telephony/twilio/token` with query parameter `agentId` (Targeting `telephony-service`).
+  - *Purpose:* Generates short-lived Twilio capability JWTs containing a VoiceGrant. The agent's dashboard calls this to initialize the Twilio Device SDK in the browser.
 
 ---
 
@@ -468,18 +602,19 @@ Any Service          Kafka                WebSocket Gateway           Browser
   │                    │                       │                        │    clear call panel
 ```
 
-**Topics the WebSocket Gateway subscribes to:**
-- `call-events`
-- `routing-events`
-- `agent-events`
-- `call-lifecycle-events`
-
-**Frontend routing logic in `SessionStateService.handleEvent()`:**
-- `agent-events` with matching `agentId` → update agent status badge
-- `routing-events` with `ASSIGNED` and matching `agentId` → show call panel, set status "On Call"
-- `call-lifecycle-events` with `CALL_COMPLETED` → clear call panel after 3s delay, set status "Ready"
-
-**Connection:** Uses STOMP over SockJS. The `AuthChannelInterceptor` validates the JWT on the WebSocket CONNECT frame.
+**Granular Code Tracing:**
+- **Kafka Consume:** `KafkaEventConsumer.consume(ConsumerRecord<?, ?> record)` in `websocket-gateway` receives messages on topics: `call-events`, `routing-events`, `agent-events`, `call-lifecycle-events`.
+  - *Purpose:* Acts as the ingress bridge between the backend Kafka event bus and frontend client WebSockets.
+- **Method Called:** `WebSocketGateway.sendToTenant(String tenantId, RealtimeEvent event)`
+  - *Purpose:* Deserializes JSON payloads, detects tenant scope, and publishes to Spring STOMP messaging subsystem.
+- **Spring WebSocket Pub/Sub Write (Performed by WebSocket Gateway):** `messagingTemplate.convertAndSend("/topic/events/" + tenantId, realtimeEvent)`
+  - *Purpose:* In-memory client connection fan-out.
+- **Security Check (Performed by WebSocket Gateway):** `AuthChannelInterceptor.preSend(Message<?> message, MessageChannel channel)`
+  - *Purpose:* Intercepts initial STOMP `CONNECT` frame, extracts JWT token from `Authorization` header, validates credentials, and sets user context on the socket session.
+- **Frontend Action:** Angular's `SessionStateService.subscribe()` connects using SockJS. On payload ingress:
+  - Updates agent status badges (`agent-events`).
+  - Displays incoming call panel with accept/reject buttons (`routing-events` with status `ASSIGNED`).
+  - Closes call control panels (`call-lifecycle-events` with status `CALL_COMPLETED`).
 
 ---
 
@@ -488,39 +623,38 @@ Any Service          Kafka                WebSocket Gateway           Browser
 **Trigger:** Any Kafka event is published.
 
 ```
-Kafka                  Analytics Service (AnalyticsEventConsumer)          Redis
-  │                              │                                          │
-  │ call-events (isNew=true)     │                                          │
-  │─────────────────────────────►│ incrementTotalCalls(tenant)              │
-  │                              │ incrementQueuedCalls(tenant)             │
-  │                              │─────────────────────────────────────────►│
-  │                              │   INCR analytics:tenant1:totalCalls      │
-  │                              │   INCR analytics:tenant1:queuedCalls     │
-  │                              │                                          │
-  │ routing-events (ASSIGNED)    │                                          │
-  │─────────────────────────────►│ incrementRoutedCalls(tenant)             │
-  │                              │ decrementQueuedCalls(tenant)             │
-  │                              │─────────────────────────────────────────►│
-  │                              │   INCR analytics:tenant1:routedCalls     │
-  │                              │   DECR analytics:tenant1:queuedCalls     │
-  │                              │                                          │
-  │ routing-events (ABANDONED)   │                                          │
-  │─────────────────────────────►│ incrementAbandonedCalls(tenant)          │
-  │                              │ decrementQueuedCalls(tenant)             │
-  │                              │                                          │
-  │ agent-events                 │                                          │
-  │─────────────────────────────►│ updateAgentCounts(tenant, old, new)      │
-  │                              │─────────────────────────────────────────►│
-  │                              │   DECR analytics:tenant1:agents:AVAILABLE│
-  │                              │   INCR analytics:tenant1:agents:BUSY     │
-  │                              │                                          │
-  │ call-lifecycle (COMPLETED)   │                                          │
-  │─────────────────────────────►│ incrementCompletedCalls(tenant)          │
-  │                              │─────────────────────────────────────────►│
-  │                              │   INCR analytics:tenant1:completedCalls  │
+Kafka                  Analytics Service (AnalyticsEventConsumer)          PostgreSQL (tenant_metrics)
+  │                              │                                                    │
+  │ call-events (isNew=true)     │                                                    │
+  │─────────────────────────────►│ incrementTotalCalls(tenant)                        │
+  │                              │ incrementQueuedCalls(tenant)                       │
+  │                              │───────────────────────────────────────────────────►│
+  │                              │   UPDATE tenant_metrics SET total=total+1,         │
+  │                              │   queued=queued+1, version=version+1               │
+  │                              │                                                    │
+  │ routing-events (ASSIGNED)    │                                                    │
+  │─────────────────────────────►│ incrementRoutedCalls(tenant)                       │
+  │                              │ decrementQueuedCalls(tenant)                       │
+  │                              │───────────────────────────────────────────────────►│
+  │                              │   UPDATE tenant_metrics SET routed=routed+1,       │
+  │                              │   queued=queued-1, version=version+1               │
+  │                              │                                                    │
+  │ agent-events                 │                                                    │
+  │─────────────────────────────►│ updateAgentCounts(tenant, old, new)                │
+  │                              │───────────────────────────────────────────────────►│
+  │                              │   UPDATE tenant_metrics SET active=active-1,       │
+  │                              │   busy=busy+1, version=version+1                   │
 ```
 
-**Important:** Analytics uses Redis counters only (no PostgreSQL). This makes reads extremely fast for the dashboard but means counters can drift if events are processed out of order or duplicated.
+**Granular Code Tracing:**
+- **Kafka Consume:** `AnalyticsEventConsumer.consume(String message, String topic)` in `analytics-service` consumes all relevant state messages.
+- **Method Called:** `AnalyticsService.incrementTotalCalls(tenantId)` / `incrementQueuedCalls(tenantId)` / `decrementQueuedCalls(tenantId)` / `incrementRoutedCalls(tenantId)` / `updateAgentCounts(tenantId, oldStatus, newStatus)` / `incrementCompletedCalls(tenantId)`
+  - *Purpose:* Translates incoming event transitions to database counter manipulations.
+- **PostgreSQL Read (Performed by Analytics Service):** `SELECT * FROM tenant_metrics WHERE tenant_id = ?` via `TenantMetricsRepository.findById(tenantId)`
+  - *Purpose:* Checks the current aggregated metric row. A single row per tenant exists.
+- **PostgreSQL Write (Optimistic Locking - Performed by Analytics Service):** `UPDATE tenant_metrics SET total_calls = ?, queued_calls = ?, routed_calls = ?, completed_calls = ?, active_agents = ?, busy_agents = ?, offline_agents = ?, version = ? WHERE tenant_id = ? AND version = ?`
+  - *Purpose:* Persists metrics. The `@Version` JPA annotation automatically guarantees write serialization. If concurrent event threads collision (throwing `OptimisticLockingFailureException`), the service catches the exception and retries the read-update cycle up to 3 times.
+- **Redis Write (Performed by Analytics Service):** None. In-memory counters are managed directly within PostgreSQL rows to protect against analytics loss during container restarts.
 
 ---
 
@@ -550,13 +684,13 @@ Kafka                    Audit Service (KafkaAuditConsumer)         PostgreSQL
   │                              │   createdAt                         │
 ```
 
-**Source service mapping:**
-- `call-events` / `call-lifecycle-events` → `"call-service"`
-- `routing-events` → `"routing-service"`
-- `agent-events` → `"agent-state-service"`
-- `user-events` → `"user-service"`
-
-**The audit trail is immutable.** Events are only ever inserted, never updated or deleted. This provides a complete forensic history of everything that happened in the system.
+**Granular Code Tracing:**
+- **Kafka Consume:** `KafkaAuditConsumer.consume(ConsumerRecord<?, ?> record)` in `audit-service` listens to all message streams using wildcard matching pattern or a defined list of topics.
+- **Method Called:** `AuditService.logEvent(AuditEventRequest)`
+  - *Purpose:* Parses event header details and payload structures.
+- **PostgreSQL Write (Performed by Audit Service):** `INSERT INTO audit_events (id, tenant_id, event_type, source_service, entity_type, entity_id, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  - *Purpose:* Appends a new immutable row in the `audit_events` table in the `minigenesys_audit` database.
+- **Immutability Policy:** The service provides no UPDATE or DELETE API interfaces, securing a forensic transaction log.
 
 ---
 
@@ -625,7 +759,7 @@ Topic: `routing-events`, partition key: `"tenant1"`
 → agent.setActiveCallId("abc-123")
 → agent.setLastAssignedTime(now())
 → agentRepository.save(agent)  [PG UPDATE: agents SET status=BUSY, active_call_id=abc-123]
-→ updateRedisState(agent, AVAILABLE, BUSY)
+→ updateRedisState(agent, BUSY)
     opsForHash().put("tenant:tenant1:agent:AG_001:state", "status", "BUSY")
     opsForHash().put("tenant:tenant1:agent:AG_001:state", "lastAssignedTime", now)
     for skill in agent.skills:

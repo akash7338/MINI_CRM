@@ -32,10 +32,10 @@ Manages the entire call lifecycle from creation to completion — persists call 
 | Endpoint | Method | Purpose |
 |---|---|---|
 | `POST /api/v1/calls` | POST | Create a new call. Body: `{callerId, requiredSkills, priority}` |
-| `GET /api/v1/calls/{callId}` | GET | Get call details (with tenant check) |
+| `GET /api/v1/calls/{callId}` | GET | **State Restoration:** Fetched by frontend during browser refresh if agent is currently assigned to a call, getting true PG status instead of guessing |
 | `POST /api/v1/calls/{callId}/start` | POST | Transition ROUTED → IN_PROGRESS |
 | `POST /api/v1/calls/{callId}/complete` | POST | Transition IN_PROGRESS → COMPLETED, publishes `CALL_COMPLETED` lifecycle event |
-| `POST /api/v1/calls/{callId}/reject` | POST | Transition ROUTED → QUEUED. Requeues call (`isNew: false`) AND publishes `CALL_COMPLETED` to free the rejecting agent |
+| `POST /api/v1/calls/{callId}/reject` | POST | Transition ROUTED → QUEUED. Requeues call (`newCall: false`) AND publishes `CALL_COMPLETED` to free the rejecting agent |
 
 ### Validation Rules
 - `startCall()` — Call must be in `ROUTED` status, otherwise `409 CONFLICT`
