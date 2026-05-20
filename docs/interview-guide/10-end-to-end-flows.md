@@ -120,9 +120,12 @@ This is identical to the login flow but with a different state transition:
 
 ## 4. Call Creation Flow
 
-**Trigger:** Agent clicks "Simulate Call" on the dashboard, OR a real Twilio inbound call arrives.
+Trigger: Agent clicks "Simulate Call" on the dashboard, OR a real Twilio inbound call arrives.
 
-### Simulated Call Path (Dashboard)
+---
+
+### A. Simulated Call Creation Path (Dashboard)
+
 ```
 Browser                  API Gateway         Call Service              Kafka
   │                          │                    │                      │
@@ -139,11 +142,28 @@ Browser                  API Gateway         Call Service              Kafka
   │ ◄── { callId, QUEUED } ──│◄───────────────────│                      │
 ```
 
-### Real Twilio Inbound Call Path
+**Granular Code Tracing:**
+- **API Endpoint:** `POST /api/v1/calls` (Targeting `call-service`).
+  - *Purpose:* Generates a simulated inbound call for routing testing.
+- **Method Called (Call Service):** `CallService.createCall(tenantId, CreateCallRequest)`
+  - *Purpose:* Validates skills exist, generates a new call UUID, sets initial status to `QUEUED`, and triggers Kafka event publish.
+- **PostgreSQL Write (Call Service):** `INSERT INTO calls (id, tenant_id, status, required_skills, priority) VALUES (?, ?, 'QUEUED', ?, ?)`
+  - *Purpose:* Creates the master source-of-truth call record in the `minigenesys_call` database.
+- **Kafka Publish (Performed by Call Service):** Sends a payload to the `call-events` topic containing `{callId, tenantId, requiredSkills, priority, newCall: true}`.
+  - *Purpose:* Launches async matching and updates downstream telemetry:
+    - **Trigger Routing:** It triggers `routing-service`'s `consumeCallEvent()` to run the Lua script matching logic and assign an available agent immediately.
+    - **Trigger Dashboards:** It triggers `websocket-gateway` to broadcast the call to the supervisor dashboard.
+    - **Trigger Analytics:** It triggers `analytics-service` to increment `totalCalls` and `queuedCalls` in PostgreSQL counters.
+
+---
+
+### B. Real Twilio Inbound Call Creation Path
+
 ```
 Twilio                   Telephony Service       Call Service            Kafka
   │                           │                       │                    │
-  │ POST /twilio/inbound      │                       │                    │
+  │ POST /api/v1/telephony/   │                       │                    │
+  │      twilio/inbound       │                       │                    │
   │ { CallSid, From, To }     │                       │                    │
   │──────────────────────────►│                       │                    │
   │                           │ REST: createInternalCall                   │
@@ -158,17 +178,15 @@ Twilio                   Telephony Service       Call Service            Kafka
 ```
 
 **Granular Code Tracing:**
-- **API Endpoint (Simulated):** `POST /api/v1/calls` (Targeting `call-service`).
-  - *Purpose:* Generates a simulated inbound call for routing testing.
-- **API Endpoint (Real Call):** `POST /twilio/inbound` (Targeting `telephony-service`).
+- **API Endpoint (Real Call):** `POST /api/v1/telephony/twilio/inbound` (Targeting `telephony-service`).
   - *Purpose:* Receives Twilio's incoming call webhook parameters.
-- **Method Called (Call Service):** `CallService.createCall(CallRequest)`
-  - *Purpose:* Validates skills exist, generates a new call UUID, sets initial status to `QUEUED`, and schedules routing.
-- **Method Called (Telephony):** `TelephonyService.createInternalCall()`
-  - *Purpose:* Makes an internal REST call to `POST /api/v1/calls` on the Call Service.
+- **Method Called (Telephony Service):** `TelephonyService.handleInboundCall(callSid, from, to, tenantId)`
+  - *Purpose:* Handles internal call creation and session persistence.
+- **REST Call (Telephony Service → Call Service):** `POST /api/v1/calls` (via `CallServiceClient.createInternalCall()`).
+  - *Purpose:* Triggers call creation on Call Service, returning the internal call UUID.
 - **PostgreSQL Write (Call Service):** `INSERT INTO calls (id, tenant_id, status, required_skills, priority) VALUES (?, ?, 'QUEUED', ?, ?)`
   - *Purpose:* Creates the master source-of-truth call record in the `minigenesys_call` database.
-- **PostgreSQL Write (Telephony Service):** `INSERT INTO telephony_call_sessions (id, internal_call_id, twilio_call_sid, status) VALUES (?, ?, ?, 'RINGING')`
+- **PostgreSQL Write (Telephony Service):** `INSERT INTO telephony_call_sessions (twilio_call_sid, internal_call_id, from_number, to_number, tenant_id, status) VALUES (?, ?, ?, ?, ?, 'ringing')`
   - *Purpose:* Maps Twilio's external `CallSid` to the internal call UUID in the `minigenesys_telephony` database.
 - **Kafka Publish (Performed by Call Service):** Sends a payload to the `call-events` topic containing `{callId, tenantId, requiredSkills, priority, newCall: true}`.
   - *Purpose:* Launches async matching and updates downstream telemetry:
