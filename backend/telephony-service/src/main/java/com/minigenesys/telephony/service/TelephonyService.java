@@ -2,6 +2,7 @@ package com.minigenesys.telephony.service;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 import com.twilio.jwt.accesstoken.AccessToken;
 import com.twilio.jwt.accesstoken.VoiceGrant;
@@ -38,23 +39,22 @@ public class TelephonyService {
     @Value("${twilio.twimlAppSid}")
     private String twimlAppSid;
 
-    public String handleInboundCall(String callSid, String from, String to, String tenantId) {
+    public void handleInboundCall(String callSid, String from, String to, String tenantId) {
         log.info("Handling inbound call from {} to {} with SID {} for tenant {}", from, to, callSid, tenantId);
-        
-        // 1. Idempotency Check: Don't create a new call if we already have one for this SID
+
+        // 1. Idempotency Check: Don't create a new call if we already have one for this
+        // SID
         Optional<TelephonyCallSession> existing = repository.findByTwilioCallSid(callSid);
         if (existing.isPresent()) {
-            log.info("Call SID {} already exists, returning existing internal call ID", callSid);
-            return existing.get().getInternalCallId();
+            log.info("Call SID {} already exists, skipping creation.", callSid);
+            return;
         }
 
         // 2. REST call outside @Transactional to avoid holding DB connections
         String internalCallId = callServiceClient.createInternalCall(tenantId, from);
-        
+
         // 3. Save session in a localized transaction
         saveNewSession(callSid, internalCallId, from, to, tenantId);
-        
-        return internalCallId;
     }
 
     @Transactional
@@ -72,14 +72,16 @@ public class TelephonyService {
 
     @Transactional
     public void handleAssignment(RoutingEvent event) {
-        if (!"ASSIGNED".equals(event.getStatus())) return;
-        
-        log.info("Updating telephony session for internal call {} with assigned agent {}", 
-            event.getCallId(), event.getAgentId());
-            
+        if (!"ASSIGNED".equals(event.getStatus()))
+            return;
+
+        log.info("Updating telephony session for internal call {} with assigned agent {}",
+                event.getCallId(), event.getAgentId());
+
         TelephonyCallSession session = repository.findByInternalCallId(event.getCallId())
-            .orElseThrow(() -> new RuntimeException("Telephony session not found for internal call " + event.getCallId() + ". Retrying..."));
-            
+                .orElseThrow(() -> new RuntimeException(
+                        "Telephony session not found for internal call " + event.getCallId() + ". Retrying..."));
+
         // Only update if not already assigned
         if (session.getAssignedAgentId() == null) {
             session.setAssignedAgentId(event.getAgentId());
@@ -88,8 +90,8 @@ public class TelephonyService {
         }
     }
 
-    private final Map<String, Map<String, String>> tokenCache = new java.util.concurrent.ConcurrentHashMap<>();
-    private final Map<String, Long> tokenExpiry = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<String, Map<String, String>> tokenCache = new ConcurrentHashMap<>();
+    private final Map<String, Long> tokenExpiry = new ConcurrentHashMap<>();
 
     public Map<String, String> generateToken(String identity) {
         long now = System.currentTimeMillis();
@@ -109,9 +111,8 @@ public class TelephonyService {
                 .build();
 
         Map<String, String> result = Map.of(
-            "token", token.toJwt(),
-            "identity", identity
-        );
+                "token", token.toJwt(),
+                "identity", identity);
 
         tokenCache.put(identity, result);
         tokenExpiry.put(identity, now + 5000); // Cache for 5 seconds
@@ -119,34 +120,33 @@ public class TelephonyService {
         return result;
     }
 
-
     public String getBridgeTwiml(String callSid) {
         Optional<TelephonyCallSession> sessionOpt = repository.findByTwilioCallSid(callSid);
-        
+
         if (sessionOpt.isPresent() && sessionOpt.get().getAssignedAgentId() != null) {
             String agentId = sessionOpt.get().getAssignedAgentId();
             log.info("Bridging call {} to agent {}", callSid, agentId);
             return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
-                   "<Response>\n" +
-                   "    <Dial answerOnBridge=\"true\">\n" +
-                   "        <Client>" + agentId + "</Client>\n" +
-                   "    </Dial>\n" +
-                   "</Response>";
+                    "<Response>\n" +
+                    "    <Dial answerOnBridge=\"true\">\n" +
+                    "        <Client>" + agentId + "</Client>\n" +
+                    "    </Dial>\n" +
+                    "</Response>";
         }
 
         // Still waiting
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
-               "<Response>\n" +
-               "    <Say>Your call is still in queue</Say>\n" +
-               "    <Pause length=\"3\"/>\n" +
-               "    <Redirect method=\"GET\">/api/v1/telephony/twilio/bridge?callSid=" + callSid + "</Redirect>\n" +
-               "</Response>";
+                "<Response>\n" +
+                "    <Say>Your call is still in queue</Say>\n" +
+                "    <Pause length=\"3\"/>\n" +
+                "    <Redirect method=\"GET\">/api/v1/telephony/twilio/bridge?callSid=" + callSid + "</Redirect>\n" +
+                "</Response>";
     }
 
     @Transactional
     public void handleStatusCallback(String callSid, String callStatus, String from, String to) {
         log.info("Handling status callback for SID {}: {}", callSid, callStatus);
-        
+
         repository.findByTwilioCallSid(callSid).ifPresent(session -> {
             session.setStatus(callStatus);
             repository.save(session);
@@ -154,12 +154,13 @@ public class TelephonyService {
             try {
                 if ("in-progress".equals(callStatus)) {
                     callServiceClient.startCall(session.getTenantId(), session.getInternalCallId());
-                /*
-                } else if ("completed".equals(callStatus) || "canceled".equals(callStatus) || 
-                           "no-answer".equals(callStatus) || "failed".equals(callStatus)) {
-                    callServiceClient.completeCall(session.getTenantId(), session.getInternalCallId());
-                }
-                */
+                    /*
+                     * } else if ("completed".equals(callStatus) || "canceled".equals(callStatus) ||
+                     * "no-answer".equals(callStatus) || "failed".equals(callStatus)) {
+                     * callServiceClient.completeCall(session.getTenantId(),
+                     * session.getInternalCallId());
+                     * }
+                     */
                 } else if ("completed".equals(callStatus)) {
                     callServiceClient.completeCall(session.getTenantId(), session.getInternalCallId());
                 }

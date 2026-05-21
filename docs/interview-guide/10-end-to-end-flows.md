@@ -530,41 +530,58 @@ Time 30-40s: AgentStateService.detectDisconnects() runs (every 10s)
 
 **Trigger:** A real phone call hits the Twilio number, which POSTs to the telephony-service webhook.
 
-```
-Phone Call          Twilio Cloud        Telephony Service      Call Service       Routing Service
-  │                     │                     │                     │                   │
-  │ Customer dials      │                     │                     │                   │
-  │────────────────────►│                     │                     │                   │
-  │                     │ POST /twilio/inbound│                     │                   │
-  │                     │ CallSid, From, To   │                     │                   │
-  │                     │────────────────────►│                     │                   │
-  │                     │                     │                     │                   │
-  │                     │                     │ REST: POST /calls   │                   │
-  │                     │                     │────────────────────►│                   │
-  │                     │                     │                     │ Publish call-events│
-  │                     │                     │                     │──────────────────►│
-  │                     │                     │ ◄── callId ─────────│                   │
-  │                     │                     │                     │                   │
-  │                     │                     │ Save TelephonyCallSession               │
-  │                     │                     │ (maps CallSid ↔ callId)                 │
-  │                     │                     │                     │                   │
-  │                     │ ◄── TwiML response ─│                     │                   │
-  │                     │   "Please wait..."  │                     │                   │
-  │                     │   Redirect → /bridge│                     │                   │
-  │                     │                     │                     │                   │
-  │ Customer hears      │                     │                     │   assignAgent()   │
-  │ "Please wait..."    │                     │                     │                   │
-  │                     │                     │                     │                   │
-  │                     │                     │ Consumes routing-events (ASSIGNED)       │
-  │                     │                     │ Updates session.assignedAgentId          │
-  │                     │                     │                     │                   │
-  │                     │ GET /twilio/bridge   │                     │                   │
-  │                     │────────────────────►│                     │                   │
-  │                     │                     │ Returns TwiML:      │                   │
-  │                     │ ◄── <Dial><Client>  │  Bridge to AG_001   │                   │
-  │                     │      AG_001         │                     │                   │
-  │                     │                     │                     │                   │
-  │ ◄── Voice connected ─────────────── Agent's browser (WebRTC)   │                   │
+```text
+Customer         Twilio Cloud        Telephony Service      Call Service       Routing Service       Agent WebRTC
+   │                   │                     │                   │                    │                   │
+   │ 1. Dials Phone    │                     │                   │                    │                   │
+   │──────────────────►│                     │                   │                    │                   │
+   │                   │ 2. POST /inbound    │                   │                    │                   │
+   │                   │────────────────────►│                   │                    │                   │
+   │                   │                     │ 3. POST /calls    │                    │                   │
+   │                   │                     │──────────────────►│                    │                   │
+   │                   │                     │                   │ 4. Kafka:          │                   │
+   │                   │                     │                   │    'call-events'   │                   │
+   │                   │                     │                   │───────────────────►│                   │
+   │                   │                     │ 5. Returns callId │                    │                   │
+   │                   │                     │◄──────────────────│                    │                   │
+   │                   │                     │                   │                    │                   │
+   │                   │                     │ [Save DB Session: │                    │                   │
+   │                   │                     │  CallSid ↔ callId]│                    │                   │
+   │                   │                     │                   │                    │                   │
+   │                   │ 6. Return TwiML:    │                   │                    │                   │
+   │                   │    <Say>Please wait>│                   │                    │                   │
+   │                   │    <Redirect>/bridge│                   │                    │                   │
+   │                   │◄────────────────────│                   │                    │                   │
+   │                   │                     │                   │                    │ 7. Run Matcher:   │
+   │                   │                     │                   │                    │    assignAgent()  │
+   │                   │                     │                   │                    │                   │
+   │                   │                     │                   │                    │ 8. Kafka:         │
+   │                   │                     │                   │                    │    'routing-event'│
+   │                   │                     │                   │                    │    (ASSIGNED)     │
+   │                   │                     │                   │                    │──────────────────►│
+   │                   │                     │ 9. Consume Event: │                    │                   │
+   │                   │                     │    assignedAgentId│                    │                   │
+   │                   │                     │    = AG_001       │                    │                   │
+   │                   │                     │◄───────────────────────────────────────────────────────────│
+   │                   │                     │                   │                    │                   │
+   │                   │═══ POLL BRIDGE LOOP (Every 3s) ═════════│                    │                   │
+   │                   │ 10. GET /bridge     │                   │                    │                   │
+   │                   │────────────────────►│                   │                    │                   │
+   │                   │                     │                   │                    │                   │
+   │                   │     [Agent is NULL: │                   │                    │                   │
+   │                   │      Return TwiML   │                   │                    │                   │
+   │                   │      Redirect]      │                   │                    │                   │
+   │                   │     - OR -          │                   │                    │                   │
+   │                   │     [Agent AG_001:  │                   │                    │                   │
+   │                   │      Return TwiML   │                   │                    │                   │
+   │                   │      <Dial><Client>]│                   │                    │                   │
+   │                   │ 11. ◄───────────────│                   │                    │                   │
+   │                   │═════════════════════════════════════════│                    │                   │
+   │                   │                     │                   │                    │                   │
+   │                   │ 12. Connect WebRTC (audio)              │                    │                   │
+   │                   │─────────────────────────────────────────────────────────────────────────────►│
+   │ 13. Voice Channel │                     │                   │                    │                   │
+   │◄──────────────────│                     │                   │                    │                   │
 ```
 
 **Granular Code Tracing:**
