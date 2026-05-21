@@ -1,0 +1,30 @@
+<configuration name="sofia.conf" description="sofia Endpoint">
+  <global_settings>
+    <param name="log-level" value="0"/>
+  </global_settings>
+  <profiles>
+    <profile name="external">
+      <settings>
+        <param name="debug" value="0"/>
+        <param name="sip-ip" value="0.0.0.0"/>
+        <param name="ext-sip-ip" value="auto"/>
+        <param name="rtp-ip" value="0.0.0.0"/>
+        <param name="ext-rtp-ip" value="auto"/>
+        <param name="sip-port" value="5060"/>
+        <param name="dialplan" value="XML"/>
+        <param name="context" value="public"/>
+      </settings>
+      <gateways>
+        <!-- Placeholder for future carrier integration (e.g. Sinch/Bandwidth/Telnyx) -->
+        <!--
+        <gateway name="carrier_gateway">
+          <param name="username" value="username_placeholder"/>
+          <param name="password" value="password_placeholder"/>
+          <param name="proxy" value="sip.carrier.com"/>
+          <param name="register" value="true"/>
+        </gateway>
+        -->
+      </gateways>
+    </profile>
+  </profiles>
+</configuration>

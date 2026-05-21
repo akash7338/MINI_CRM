@@ -1,0 +1,11 @@
+<include>
+  <context name="public">
+    <extension name="inbound_pstn">
+      <condition field="destination_number" expression="^(.*)$">
+        <action application="answer"/>
+        <action application="playback" data="tone_stream://%(1000,0,800)"/>
+        <action application="park"/>
+      </condition>
+    </extension>
+  </context>
+</include>

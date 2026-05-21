@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  freeswitch_mvp:
+    image: bytedesk/freeswitch:latest
+    container_name: minigenesys-freeswitch-mvp
+    ports:
+      - "5062:5060/udp"
+      - "5062:5060/tcp"
+      - "8022:8021/tcp"
+      - "16410-16426:16384-16400/udp"
+    volumes:
+      - ./conf:/usr/local/freeswitch/etc/freeswitch
+      - ./recordings:/var/lib/freeswitch/recordings
+    restart: always

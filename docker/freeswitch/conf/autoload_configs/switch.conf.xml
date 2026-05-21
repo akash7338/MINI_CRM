@@ -1,0 +1,6 @@
+<configuration name="switch.conf" description="Core Configuration">
+  <settings>
+    <param name="rtp-start-port" value="16384"/>
+    <param name="rtp-end-port" value="16400"/>
+  </settings>
+</configuration>

@@ -30,3 +30,14 @@ dist/
 bin/
 **/*.bin
 out/
+
+# TLS / Certificates — never commit private keys or self-signed certs
+*.pem
+*.key
+*.crt
+*.p12
+*.jks
+docker/freeswitch/conf/tls/
+
+# FreeSWITCH runtime / recordings (binary audio files, not source)
+docker/freeswitch/recordings/
