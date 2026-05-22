@@ -1,18 +1,23 @@
+<!--
+  Purpose: Sofia SIP engine configuration.
+  Configures the SIP profiles (external for trunk gateways, internal for WebRTC/WS/WSS clients).
+  Defines SIP binding ports, registration requirements, codecs, and TLS settings.
+-->
 <configuration name="sofia.conf" description="sofia Endpoint">
   <global_settings>
     <param name="log-level" value="0"/>
   </global_settings>
   <profiles>
-    <profile name="external">
+    <profile name="external"> <!-- Used for incoming calls from SIP carriers/trunks and for registering SIP trunks (outbound). -->
       <settings>
         <param name="debug" value="0"/>
-        <param name="sip-ip" value="0.0.0.0"/>
-        <param name="ext-sip-ip" value="auto"/>
-        <param name="rtp-ip" value="0.0.0.0"/>
-        <param name="ext-rtp-ip" value="auto"/>
-        <param name="sip-port" value="5060"/>
-        <param name="dialplan" value="XML"/>
-        <param name="context" value="public"/>
+        <param name="sip-ip" value="0.0.0.0"/>  <!-- 0.0.0.0 tells FreeSWITCH to listen for SIP signaling (INVITE, ACK, etc.) on all interfaces.  -->
+        <param name="ext-sip-ip" value="auto"/>  <!-- tells FreeSWITCH to automatically detect its external IP address -->
+        <param name="rtp-ip" value="0.0.0.0"/> <!-- 0.0.0.0 tells FreeSWITCH to listen for media (RTP) traffic on all available network interfaces inside the container. -->
+        <param name="ext-rtp-ip" value="auto"/> <!-- tells FreeSWITCH to automatically detect its external IP address for media traffic -->
+        <param name="sip-port" value="5060"/> <!-- Standard SIP port for incoming/outgoing calls over the PSTN/SIP trunks. -->
+        <param name="dialplan" value="XML"/> <!-- Tells FreeSWITCH to load dialplans from XML files in the dialplan directory. -->
+        <param name="context" value="public"/> <!--When a SIP call enters this profile, send the call into dialplan context named public . -->
       </settings>
       <gateways>
         <!-- Placeholder for future carrier integration (e.g. Sinch/Bandwidth/Telnyx) -->
@@ -25,6 +30,42 @@
         </gateway>
         -->
       </gateways>
+    </profile>
+
+    <profile name="internal"> <!-- Used for internal traffic, such as WebRTC clients and applications inside the same network. -->
+      <settings>
+        <param name="debug" value="0"/>
+        <param name="sip-ip" value="0.0.0.0"/> <!-- 0.0.0.0 tells FreeSWITCH to listen for SIP signaling (INVITE, ACK, etc.) on all interfaces. -->
+        <param name="ext-sip-ip" value="auto"/>  <!-- tells FreeSWITCH to automatically detect its external IP address -->
+        <param name="rtp-ip" value="0.0.0.0"/> <!-- 0.0.0.0 tells FreeSWITCH to listen for media (RTP) traffic on all available network interfaces inside the container. -->
+        <param name="ext-rtp-ip" value="auto"/> <!-- tells FreeSWITCH to automatically detect its external IP address for media traffic -->
+        <param name="sip-port" value="5064"/> <!-- Standard SIP port for internal calls over the WebRTC and applications -->
+        <param name="dialplan" value="XML"/> <!-- Tells FreeSWITCH to load dialplans from XML files in the dialplan directory. -->
+        <param name="context" value="public"/> <!-- Default context for internal calls. -->
+        
+        <!-- WebRTC WebSockets bindings -->
+        <param name="ws-binding" value=":5066"/> <!-- WebSocket binding for WebRTC clients -->
+        <param name="wss-binding" value=":7443"/> <!-- Encrypted WebSocket binding for WebRTC clients -->     
+        
+        <!-- Easy local development settings (blind registration, no auth checks) -->
+        <param name="accept-blind-reg" value="true"/> <!-- Allows devices to register without passwords (not recommended for production) -->
+        <param name="auth-calls" value="false"/> <!-- Disables call authentication (not recommended for production) -->
+        
+        <!-- RTP & Timers -->
+        <param name="enable-rtp-timer" value="true"/>
+        <param name="rtp-timer-name" value="soft"/>
+        <param name="rtp-timeout-sec" value="300"/> 
+        <param name="rtp-hold-timeout-sec" value="1800"/>
+        <param name="all-reg-in-db" value="true"/>
+        
+        <!-- WebRTC secure TLS configuration -->
+        <param name="tls" value="true"/>
+        <param name="tls-only" value="false"/>
+        <param name="tls-bind-params" value="transport=tls"/>
+        <param name="tls-sip-port" value="5061"/>
+        <param name="tls-cert-dir" value="/usr/local/freeswitch/etc/freeswitch/tls"/>
+        <param name="rtp-secure-media" value="optional"/>
+      </settings>
     </profile>
   </profiles>
 </configuration>

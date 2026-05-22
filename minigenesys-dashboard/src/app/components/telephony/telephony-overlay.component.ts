@@ -4,6 +4,7 @@ import { ApiService } from '../../services/api.service';
 import { SessionStateService } from '../../services/session-state.service';
 import { CommonModule } from '@angular/common';
 import { Call } from '@twilio/voice-sdk';
+import { FreeswitchWebRtcService } from '../../services/freeswitch-webrtc.service';
 
 @Component({
   selector: 'app-telephony-overlay',
@@ -11,7 +12,7 @@ import { Call } from '@twilio/voice-sdk';
   imports: [CommonModule],
   template: `
     <!-- Incoming Call Popup -->
-    <div *ngIf="incomingCall" class="call-popup">
+    <div *ngIf="incomingCall || incomingSession" class="call-popup">
       <div class="popup-header">
         <span class="pulse-icon"></span>
         Incoming Call
@@ -19,7 +20,7 @@ import { Call } from '@twilio/voice-sdk';
       <div class="popup-body">
         <div class="caller-info">
           <label>From:</label>
-          <span>{{ incomingCall.parameters['From'] }}</span>
+          <span>{{ incomingCall ? incomingCall.parameters['From'] : (incomingSession?.remote_identity?.uri?.user || 'FreeSWITCH') }}</span>
         </div>
         <div class="status-badge">Ringing...</div>
       </div>
@@ -30,11 +31,11 @@ import { Call } from '@twilio/voice-sdk';
     </div>
 
     <!-- Active Call Banner -->
-    <div *ngIf="activeCall" class="active-call-banner">
+    <div *ngIf="activeCall || activeSession" class="active-call-banner">
       <div class="banner-content">
         <span class="active-icon"></span>
         <span class="active-label">Active Call:</span>
-        <span class="active-number">{{ activeCall.parameters['From'] }}</span>
+        <span class="active-number">{{ activeCall ? activeCall.parameters['From'] : (activeSession?.remote_identity?.uri?.user || 'FreeSWITCH') }}</span>
         <span class="timer">{{ duration }}s</span>
       </div>
       <button (click)="onHangup()" class="btn-hangup">Hang Up</button>
@@ -214,29 +215,50 @@ import { Call } from '@twilio/voice-sdk';
 })
 export class TelephonyOverlayComponent implements OnInit {
   incomingCall: Call | null = null;
+  incomingSession: any | null = null;
   activeCall: Call | null = null;
+  activeSession: any | null = null;
   duration = 0;
   timer: any;
 
   constructor(
     private telephonyService: TelephonyService,
+    private freeswitchWebRtc: FreeswitchWebRtcService,
     private apiService: ApiService,
     private session: SessionStateService
   ) {}
 
   ngOnInit() {
-    this.telephonyService.incomingCall$.subscribe(call => {
-      this.incomingCall = call;
-    });
+    const provider = localStorage.getItem('telephonyProvider') || 'TWILIO';
+    if (provider === 'TWILIO') {
+      this.telephonyService.incomingCall$.subscribe(call => {
+        this.incomingCall = call;
+      });
 
-    this.telephonyService.activeCall$.subscribe(call => {
-      this.activeCall = call;
-      if (call) {
+      this.telephonyService.activeCall$.subscribe(call => {
+        this.activeCall = call;
+        this.updateTimer();
+      });
+    } else if (provider === 'FREESWITCH') {
+      this.freeswitchWebRtc.incomingSession$.subscribe(session => {
+        this.incomingSession = session;
+      });
+
+      this.freeswitchWebRtc.activeSession$.subscribe(session => {
+        this.activeSession = session;
+        this.updateTimer();
+      });
+    }
+  }
+
+  updateTimer() {
+    if (this.activeCall || this.activeSession) {
+      if (!this.timer) {
         this.startTimer();
-      } else {
-        this.stopTimer();
       }
-    });
+    } else {
+      this.stopTimer();
+    }
   }
 
   startTimer() {
@@ -249,23 +271,54 @@ export class TelephonyOverlayComponent implements OnInit {
   stopTimer() {
     if (this.timer) {
       clearInterval(this.timer);
+      this.timer = null;
     }
   }
 
   onAccept() {
     if (this.incomingCall) {
       this.telephonyService.acceptCall(this.incomingCall);
+    } else if (this.incomingSession) {
+      this.freeswitchWebRtc.acceptCall(this.incomingSession);
     }
   }
 
   onReject() {
     if (this.incomingCall) {
       this.telephonyService.rejectCall(this.incomingCall);
+    } else if (this.incomingSession) {
+      this.freeswitchWebRtc.rejectCall(this.incomingSession);
+      
+      const currentCallId = this.session.call.callId;
+      const agentId = this.session.agent.agentId;
+      if (!agentId) return;
+
+      this.session.setAgentStatus('Offline');
+      this.apiService.updateAgentStatus(agentId, 'logout').subscribe({
+        next: () => {
+          if (currentCallId) {
+            this.apiService.updateCallStatus(currentCallId, 'REJECTED').subscribe(() => {
+              this.session.setCall(null, null);
+            });
+          }
+        },
+        error: () => {
+          if (currentCallId) {
+            this.apiService.updateCallStatus(currentCallId, 'REJECTED').subscribe(() => {
+              this.session.setCall(null, null);
+            });
+          }
+        }
+      });
     }
   }
 
   onHangup() {
-    this.telephonyService.hangup();
+    if (this.activeCall) {
+      this.telephonyService.hangup();
+    } else if (this.activeSession) {
+      this.freeswitchWebRtc.hangup();
+    }
     
     // Notify the backend that the call has ended so agent state resets
     const currentCallId = this.session.call.callId;

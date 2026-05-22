@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Purpose: Main configuration bootstrapper for FreeSWITCH.
+  This file serves as the root XML loader, pre-processing and including
+  all sub-configuration files (autoload_configs, dialplans, and directories).
+-->
 <document type="freeswitch/xml">
   <section name="configuration" description="Various Configuration">
     <X-PRE-PROCESS cmd="include" data="autoload_configs/*.xml"/>

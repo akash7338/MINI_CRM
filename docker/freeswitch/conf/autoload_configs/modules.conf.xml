@@ -1,3 +1,9 @@
+<!--
+  Purpose: Module loading configuration.
+  Specifies which modules load when the FreeSWITCH process starts.
+  Only the required modules for the MVP (SIP engine, Event Socket, loopback,
+  dialplans, dialplan tools, and commands) are active to keep startup lightweight.
+-->
 <configuration name="modules.conf" description="Modules">
   <modules>
     <load module="mod_console"/>

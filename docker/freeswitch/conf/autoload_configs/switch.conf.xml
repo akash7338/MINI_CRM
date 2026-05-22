@@ -1,3 +1,8 @@
+<!--
+  Purpose: Core FreeSWITCH engine switch configuration.
+  Configures global settings for the core engine, such as the minimum
+  and maximum RTP port range bounds for handling UDP media traffic.
+-->
 <configuration name="switch.conf" description="Core Configuration">
   <settings>
     <param name="rtp-start-port" value="16384"/>

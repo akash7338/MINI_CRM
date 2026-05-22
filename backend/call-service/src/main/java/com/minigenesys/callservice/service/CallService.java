@@ -35,6 +35,7 @@ public class CallService {
                 .requiredSkills(request.getRequiredSkills())
                 .priority(priority)
                 .status(CallStatus.QUEUED) // Initial status per requirements
+                .telephonyProvider(request.getTelephonyProvider()) // explicit, never defaulted
                 .build();
 
         call = callRepository.save(call);
@@ -44,6 +45,7 @@ public class CallService {
                 .tenantId(call.getTenantId())
                 .requiredSkills(call.getRequiredSkills())
                 .priority(call.getPriority())
+                .telephonyProvider(call.getTelephonyProvider()) // carry through to routing-service
                 .build();
 
         callEventProducer.publishCallEvent(event);
@@ -143,6 +145,7 @@ public class CallService {
                 .requiredSkills(call.getRequiredSkills())
                 .priority(call.getPriority())
                 .newCall(false)
+                .telephonyProvider(call.getTelephonyProvider()) // provider never changes after creation
                 .build();
         callEventProducer.publishCallEvent(requeueEvent);
 
@@ -248,6 +251,7 @@ public class CallService {
                     .requiredSkills(call.getRequiredSkills())
                     .priority(call.getPriority())
                     .newCall(false)
+                    .telephonyProvider(call.getTelephonyProvider()) // provider never changes after creation
                     .build();
 
             callEventProducer.publishCallEvent(requeueEvent);
@@ -265,6 +269,7 @@ public class CallService {
                 .status(call.getStatus())
                 .assignedAgentId(call.getAssignedAgentId())
                 .routingFailureReason(call.getRoutingFailureReason())
+                .telephonyProvider(call.getTelephonyProvider())
                 .createdAt(call.getCreatedAt())
                 .updatedAt(call.getUpdatedAt())
                 .build();

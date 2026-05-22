@@ -1,3 +1,8 @@
+<!--
+  Purpose: Inbound dialplan for the 'public' context.
+  Matches any incoming calls, answers them, plays a brief ringback tone,
+  and parks the channel to await routing instructions from our routing service via ESL.
+-->
 <include>
   <context name="public">
     <extension name="inbound_pstn">

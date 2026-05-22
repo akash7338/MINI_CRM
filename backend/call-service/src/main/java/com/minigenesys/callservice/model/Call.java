@@ -43,6 +43,19 @@ public class Call {
 
     private String routingFailureReason;
 
+    /**
+     * Telephony provider that owns this call. Derived from Tenant.telephonyProvider
+     * at call creation time and never changed afterwards.
+     * Values: "TWILIO" | "FREESWITCH".
+     *
+     * columnDefinition DEFAULT 'TWILIO': existing rows created before this column
+     * was added will be backfilled with TWILIO by ddl-auto:update ALTER TABLE.
+     * All new calls must supply this value explicitly via CreateCallRequest.
+     */
+    @Column(name = "telephony_provider", nullable = false,
+            columnDefinition = "VARCHAR(32) DEFAULT 'TWILIO'")
+    private String telephonyProvider;
+
     @CreationTimestamp
     private Instant createdAt;
 

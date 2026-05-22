@@ -1,3 +1,8 @@
+<!--
+  Purpose: Global variables configuration.
+  Defines preprocessor variables (like domain, external IP, codecs)
+  that can be referenced elsewhere in FreeSWITCH config using '$${var_name}'.
+-->
 <include>
   <!-- Minimal vars placeholder -->
 </include>

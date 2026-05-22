@@ -1,3 +1,9 @@
+<!--
+  Purpose: SIP User Directory.
+  Stores user account configurations for registration and authentication.
+  Since we are running in B2BUA (Back-to-Back User Agent) mode with blind
+  registration enabled for the local WebRTC client, this is left empty.
+-->
 <include>
   <!-- Empty user directory for B2BUA mode -->
 </include>

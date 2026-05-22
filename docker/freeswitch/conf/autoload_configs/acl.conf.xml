@@ -1,6 +1,22 @@
+<!--
+  Purpose: Access Control List (ACL) configuration.
+  Defines network subnet lists that can be used to allow or deny traffic for various
+  modules (like mod_sofia or mod_event_socket).
+  Our 'lan' list uses a default-deny policy and explicitly permits only localhost
+  and private/Docker subnet spaces to protect FreeSWITCH from public access.
+  Classless Inter-Domain Routing (CIDR) notation specifies the IP address range. In this specific case 
+  '127.0.0.1/32' refers to the local host, 
+  '10.0.0.0/8' refers to the private network range of 10.x.x.x, 
+  '172.16.0.0/12' refers to the private network range of 172.16.x.x to 172.31.x.x, and 
+  '192.168.0.0/16' refers to the private network range of 192.168.x.x.
+-->
 <configuration name="acl.conf" description="Network Lists">
   <network-lists>
-    <list name="lan" default="allow">
+    <list name="lan" default="deny">
+      <node type="allow" cidr="127.0.0.1/32"/>
+      <node type="allow" cidr="10.0.0.0/8"/>
+      <node type="allow" cidr="172.16.0.0/12"/>
+      <node type="allow" cidr="192.168.0.0/16"/>
     </list>
   </network-lists>
 </configuration>

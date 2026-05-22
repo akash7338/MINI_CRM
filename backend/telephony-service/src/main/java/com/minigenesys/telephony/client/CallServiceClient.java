@@ -27,7 +27,8 @@ public class CallServiceClient {
         Map<String, Object> body = Map.of(
                 "callerId", fromNumber,
                 "requiredSkills", List.of("sales"),
-                "priority", 1);
+                "priority", 1,
+                "telephonyProvider", "TWILIO");
 
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
 

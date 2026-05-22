@@ -1,3 +1,8 @@
+<!--
+  Purpose: Console logger configuration (mod_console).
+  Configures the mappings and levels of console output to be displayed in fs_cli
+  or standard output (e.g. console, info, warning, error, etc.).
+-->
 <configuration name="console.conf" description="Console Logger">
   <mappings>
     <map name="all" value="console,info,notice,warn,err,crit,alert"/>

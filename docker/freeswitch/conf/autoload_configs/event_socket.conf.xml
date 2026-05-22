@@ -1,10 +1,27 @@
+<!--
+  Purpose: Event Socket Library (ESL) interface configuration (mod_event_socket).
+  Configures the IP address, TCP port, password, and ACL bindings for inbound
+  connections to control FreeSWITCH externally (e.g. from our Spring Boot service).
+-->
 <configuration name="event_socket.conf" description="Socket Client">
   <settings>
-    <param name="listen-ip" value="0.0.0.0"/>
+<!--
+  0.0.0.0 means FreeSWITCH will bind ESL to every IP/interface available
+  inside the container, including the Docker network IP.
+
+  This is needed because Docker port mapping forwards host traffic
+  to the container's Docker network IP, not only to container localhost.
+  Docker:
+  “If traffic comes to host machine port 8022,forward it to container port 8021.”
+  So Docker creates a NETWORK ROUTE.
+  But Docker itself does NOT know whether anything is actually listening on 8021.
+  It only forwards traffic.
+-->
+<param name="listen-ip" value="0.0.0.0"/>
     <param name="listen-port" value="8021"/>
     <param name="password" value="ClueCon"/>
     <!-- apply-inbound-acl references a named list from acl.conf.xml -->
     <param name="apply-inbound-acl" value="lan"/>
-    <param name="stop-on-bind-error" value="false"/>
+    <param name="stop-on-bind-error" value="false"/> <!-- It prevents FreeSWITCH from shutting down if ESL fails to bind (e.g. port already in use). -->
   </settings>
 </configuration>

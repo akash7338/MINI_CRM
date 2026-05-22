@@ -1,3 +1,8 @@
+<!--
+  Purpose: File logger configuration (mod_logfile).
+  Controls log rotation, rollover sizes, and log mappings to write
+  FreeSWITCH event logs to the file path `/var/log/freeswitch/freeswitch.log`.
+-->
 <configuration name="logfile.conf" description="File Logging">
   <settings>
     <param name="rotate-on-hup" value="true"/>

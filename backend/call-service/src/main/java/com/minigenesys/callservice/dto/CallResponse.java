@@ -22,6 +22,7 @@ public class CallResponse {
     private CallStatus status;
     private String assignedAgentId;
     private String routingFailureReason;
+    private String telephonyProvider;
     private Instant createdAt;
     private Instant updatedAt;
 }

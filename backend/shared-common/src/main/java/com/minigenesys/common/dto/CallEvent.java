@@ -18,4 +18,14 @@ public class CallEvent {
     private Integer priority;
     @Builder.Default
     private boolean newCall = true;
+
+    /**
+     * Telephony provider for this call, derived from Tenant.telephonyProvider.
+     * Values: "TWILIO" | "FREESWITCH".
+     *
+     * NOTE: May be null for old Kafka messages already in-flight before this field
+     * was added. Consumers must treat null as "TWILIO" ONLY during the migration
+     * window. New calls must always set this explicitly.
+     */
+    private String telephonyProvider;
 }

@@ -78,10 +78,15 @@ public class TelephonyService {
         log.info("Updating telephony session for internal call {} with assigned agent {}",
                 event.getCallId(), event.getAgentId());
 
-        TelephonyCallSession session = repository.findByInternalCallId(event.getCallId())
-                .orElseThrow(() -> new RuntimeException(
-                        "Telephony session not found for internal call " + event.getCallId() + ". Retrying..."));
+        Optional<TelephonyCallSession> sessionOpt = repository.findByInternalCallId(event.getCallId());
+        if (sessionOpt.isEmpty()) {
+            log.info(
+                    "Telephony session not found for internal call {}. Skipping assignment handling (probably a FreeSWITCH call).",
+                    event.getCallId());
+            return;
+        }
 
+        TelephonyCallSession session = sessionOpt.get();
         // Only update if not already assigned
         if (session.getAssignedAgentId() == null) {
             session.setAssignedAgentId(event.getAgentId());

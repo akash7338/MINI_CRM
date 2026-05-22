@@ -1,9 +1,10 @@
 package com.minigenesys.userservice.service;
 
 import com.minigenesys.userservice.dto.*;
-import com.minigenesys.common.dto.*;
 import com.minigenesys.userservice.model.Role;
+import com.minigenesys.userservice.model.Tenant;
 import com.minigenesys.userservice.model.User;
+import com.minigenesys.userservice.repository.TenantRepository;
 import com.minigenesys.userservice.repository.UserRepository;
 import com.minigenesys.common.util.JwtUtil;
 import lombok.RequiredArgsConstructor;
@@ -28,12 +29,13 @@ import java.util.Map;
 public class UserService {
 
     private final UserRepository userRepository;
+    private final TenantRepository tenantRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
-    
+
     // Injected from RestTemplateConfig with connect/read timeouts configured
     private final RestTemplate restTemplate;
-    
+
     @Value("${services.agent-state.url:http://localhost:8086/api/v1/agents/internal}")
     private String agentStateServiceUrl;
 
@@ -84,33 +86,49 @@ public class UserService {
             HttpHeaders headers = new HttpHeaders();
             headers.set("X-Tenant-Id", tenantId);
             headers.set("X-Internal-Key", internalKey);
-            
+
             Map<String, Object> body = new HashMap<>();
             body.put("agentId", request.getAgentId());
             body.put("name", request.getName());
             body.put("skills", request.getSkills());
 
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
-            
+
             ResponseEntity<String> response = restTemplate.postForEntity(agentStateServiceUrl, entity, String.class);
             if (!response.getStatusCode().is2xxSuccessful()) {
                 throw new RuntimeException("Failed to create agent profile. Status: " + response.getStatusCode());
             }
         } catch (Exception e) {
             log.error("Error communicating with agent-state-service: ", e);
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Could not create agent profile in state service");
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Could not create agent profile in state service");
         }
     }
 
     public AuthResponse login(AuthRequest request) {
         User user = userRepository.findByUsername(request.getUsername())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid username or password"));
+                .orElseThrow(
+                        () -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid username or password"));
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid username or password");
         }
 
-        String token = jwtUtil.generateToken(user.getId().toString(), user.getTenantId(), user.getRole().name(), user.getLinkedAgentId());
+        // Tenant is the source of truth for telephonyProvider.
+        // A missing tenant record is a configuration error — fail loudly so it is caught early.
+        Tenant tenant = tenantRepository.findById(user.getTenantId())
+                .orElseThrow(() -> {
+                    log.error("Login failed: tenant '{}' not found in tenants table. " +
+                              "Ensure the tenant is seeded before creating users.", user.getTenantId());
+                    return new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                            "Tenant configuration missing. Contact your administrator.");
+                });
+
+        log.info("User '{}' (tenant: {}, provider: {}) authenticated successfully.",
+                user.getUsername(), tenant.getId(), tenant.getTelephonyProvider());
+
+        String token = jwtUtil.generateToken(user.getId().toString(), user.getTenantId(), user.getRole().name(),
+                user.getLinkedAgentId());
 
         return AuthResponse.builder()
                 .accessToken(token)
@@ -118,6 +136,7 @@ public class UserService {
                 .tenantId(user.getTenantId())
                 .role(user.getRole())
                 .agentId(user.getLinkedAgentId())
+                .telephonyProvider(tenant.getTelephonyProvider())
                 .build();
     }
 }
