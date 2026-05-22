@@ -1,0 +1,19 @@
+<!--
+  Purpose: Conference module configuration.
+  Defines the default profile for multi-party or bridged calls.
+  Configures an 8kHz rate, energy levels, DTMF distribution, and a hangup grace time.
+-->
+<configuration name="conference.conf" description="Audio Conference">
+  <advertise>
+    <room name="default" status="active"/>
+  </advertise>
+  <profiles>
+    <profile name="default">
+      <param name="rate" value="8000"/>
+      <param name="energy-level" value="300"/>
+      <param name="confflags" value="dist-dtmf"/>
+      <!-- Automatically terminate other participants (the agent) when the customer (creator) hangs up -->
+      <param name="endconf-grace-time" value="5"/>
+    </profile>
+  </profiles>
+</configuration>

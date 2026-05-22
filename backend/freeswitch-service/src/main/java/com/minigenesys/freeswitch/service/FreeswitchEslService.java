@@ -104,21 +104,36 @@ public class FreeswitchEslService {
         }
     }
 
-    public void originateCallToAgent(String agentId, String agentUuid, String callerId) {
+    public void originateCallToAgent(String agentId, String agentUuid, String customerUuid, String callerId) {
         Client c = client;
         if (c == null) {
             throw new IllegalStateException("FreeSWITCH ESL client is not connected.");
         }
-        // Dial format: sofia/internal/sip:{agentId}@localhost
-        // Park leg after answer: &park
+        // Dial format: sofia/internal/sip:{agentId}@localhost or loopback/agent_ans/public for mocks
+        // Route directly into conference on answer: &conference(customerUuid@default)
         // Set origination_uuid variable to the pre-generated agentUuid
         // Set origination_caller_id_number and origination_caller_id_name to propagate customer caller ID
+        String dialString;
+        if (agentId.startsWith("mock_") || "AG-FREESWITCH".equals(agentId)) {
+            dialString = "loopback/agent_ans/public";
+        } else {
+            dialString = "sofia/internal/sip:" + agentId + "@localhost";
+        }
         String commandArgs = "{origination_uuid=" + agentUuid +
                 ",origination_caller_id_number=" + callerId +
                 ",origination_caller_id_name=" + callerId +
-                "}sofia/internal/sip:" + agentId + "@localhost &park";
+                "}" + dialString + " &conference(" + customerUuid + "@default)";
         log.info("Originated call to agent {} with callerId {} using command: originate {}", agentId, callerId, commandArgs);
         c.sendAsyncApiCommand("originate", commandArgs);
+    }
+
+    public void transferCustomerToConference(String customerUuid) {
+        Client c = client;
+        if (c == null) {
+            throw new IllegalStateException("FreeSWITCH ESL client is not connected.");
+        }
+        log.info("Transferring customer leg {} to conference room {}@default", customerUuid, customerUuid);
+        c.sendAsyncApiCommand("uuid_transfer", customerUuid + " conference:" + customerUuid + "@default inline");
     }
 
     private void handleEvent(EslEvent event) {
@@ -140,6 +155,8 @@ public class FreeswitchEslService {
         try {
             if ("CHANNEL_PARK".equals(eventName)) {
                 handleChannelPark(uuid, headers, caller);
+            } else if ("CHANNEL_ANSWER".equals(eventName)) {
+                handleChannelAnswer(uuid, headers);
             } else if ("CHANNEL_HANGUP_COMPLETE".equals(eventName)) {
                 handleChannelHangupComplete(uuid);
             }
@@ -176,21 +193,18 @@ public class FreeswitchEslService {
                     .build();
             repository.save(session);
             log.info("Created FreeSWITCH call session: customerUuid={}, internalCallId={}", uuid, internalCallId);
+        }
+    }
 
-        } else if ("outbound".equalsIgnoreCase(direction)) {
-            // Find call session by agentUuid
+    private void handleChannelAnswer(String uuid, Map<String, String> headers) {
+        String direction = headers.get("Call-Direction");
+        if ("outbound".equalsIgnoreCase(direction)) {
             Optional<FreeswitchCallSession> sessionOpt = repository.findByAgentUuid(uuid);
             if (sessionOpt.isPresent()) {
                 FreeswitchCallSession session = sessionOpt.get();
                 if ("DIALING_AGENT".equals(session.getStatus())) {
-                    log.info("Agent answered WebRTC call. Bridging customerUuid {} and agentUuid {}",
-                            session.getCustomerUuid(), uuid);
-
-                    Client c = client;
-                    if (c != null) {
-                        // uuid_bridge <customerUuid> <agentUuid>
-                        c.sendAsyncApiCommand("uuid_bridge", session.getCustomerUuid() + " " + uuid);
-                    }
+                    log.info("Agent answered WebRTC call. Agent UUID: {} joined conference room: {}",
+                            uuid, session.getCustomerUuid());
 
                     session.setStatus("BRIDGED");
                     repository.save(session);

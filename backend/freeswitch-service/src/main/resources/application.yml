@@ -1,0 +1,47 @@
+server:
+  port: 8093
+
+spring:
+  application:
+    name: freeswitch-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/minigenesys_freeswitch}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    # Suppress open-in-view warning (no view rendering in this service)
+    open-in-view: false
+    # show-sql intentionally disabled; enable locally with -Dspring.jpa.show-sql=true
+    show-sql: false
+    # dialect intentionally omitted — Hibernate auto-detects PostgreSQL
+  kafka:
+    bootstrap-servers: ${KAFKA_SERVERS:localhost:9092}
+    consumer:
+      group-id: freeswitch-service-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
+freeswitch:
+  esl:
+    host: ${FREESWITCH_ESL_HOST:localhost}
+    # 8022 = host-mapped port for container-internal ESL port 8021
+    port: ${FREESWITCH_ESL_PORT:8022}
+    password: ${FREESWITCH_ESL_PASSWORD:ClueCon}
+    connect-timeout-seconds: ${FREESWITCH_ESL_CONNECT_TIMEOUT:10}
+    retry-interval-seconds: ${FREESWITCH_ESL_RETRY_INTERVAL:15}
+  # agent-dial-mapping: placeholder intentionally deferred to Phase 5
+
+services:
+  callServiceUrl: ${CALL_SERVICE_URL:http://localhost:8087}
+
+logging:
+  level:
+    com.minigenesys.freeswitch: DEBUG
+    org.freeswitch.esl.client: INFO

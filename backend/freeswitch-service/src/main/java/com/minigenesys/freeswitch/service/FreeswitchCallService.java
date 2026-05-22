@@ -51,9 +51,16 @@ public class FreeswitchCallService {
         session.setStatus("DIALING_AGENT");
         repository.save(session);
 
+        log.info("Transferring customer leg {} to conference room", session.getCustomerUuid());
+        try {
+            eslService.transferCustomerToConference(session.getCustomerUuid());
+        } catch (Exception e) {
+            log.error("Failed to transfer customer {} to conference: {}", session.getCustomerUuid(), e.getMessage());
+        }
+
         log.info("Dialing WebRTC agent {} with agentUuid {} for customerUuid {}", event.getAgentId(), agentUuid, session.getCustomerUuid());
         try {
-            eslService.originateCallToAgent(event.getAgentId(), agentUuid, session.getCallerId());
+            eslService.originateCallToAgent(event.getAgentId(), agentUuid, session.getCustomerUuid(), session.getCallerId());
         } catch (Exception e) {
             log.error("Failed to originate call to agent {}: {}", event.getAgentId(), e.getMessage(), e);
         }

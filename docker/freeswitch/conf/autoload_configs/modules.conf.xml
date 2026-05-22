@@ -10,6 +10,7 @@
     <load module="mod_logfile"/>
     <load module="mod_event_socket"/>
     <load module="mod_sofia"/>
+    <load module="mod_conference"/>
     <load module="mod_loopback"/>
     <load module="mod_dialplan_xml"/>
     <load module="mod_dptools"/>
