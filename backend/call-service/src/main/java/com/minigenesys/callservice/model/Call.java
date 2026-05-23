@@ -43,6 +43,10 @@ public class Call {
 
     private String routingFailureReason;
 
+    private String campaignId;
+    private String queueId;
+    private boolean disableSkills;
+
     /**
      * Telephony provider that owns this call. Derived from Tenant.telephonyProvider
      * at call creation time and never changed afterwards.

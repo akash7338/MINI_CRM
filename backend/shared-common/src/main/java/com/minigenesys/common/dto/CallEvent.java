@@ -28,4 +28,7 @@ public class CallEvent {
      * window. New calls must always set this explicitly.
      */
     private String telephonyProvider;
+    private String campaignId;
+    private String queueId;
+    private boolean disableSkills;
 }

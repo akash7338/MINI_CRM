@@ -23,6 +23,9 @@ public class CallResponse {
     private String assignedAgentId;
     private String routingFailureReason;
     private String telephonyProvider;
+    private String campaignId;
+    private String queueId;
+    private boolean disableSkills;
     private Instant createdAt;
     private Instant updatedAt;
 }

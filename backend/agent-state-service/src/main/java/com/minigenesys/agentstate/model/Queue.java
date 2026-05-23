@@ -4,21 +4,19 @@ import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
-
 import java.time.Instant;
 import java.util.Set;
 
 @Entity
-@Table(name = "agents")
+@Table(name = "queues")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class Agent {
-
+public class Queue {
     @Id
-    @Column(nullable = false, updatable = false)
+    @GeneratedValue(strategy = GenerationType.UUID)
     private String id;
 
     @Column(nullable = false)
@@ -28,22 +26,15 @@ public class Agent {
     private String name;
 
     @ElementCollection(fetch = FetchType.EAGER)
-    @CollectionTable(name = "agent_skills", joinColumns = @JoinColumn(name = "agent_id"))
-    @Column(name = "skill")
-    private Set<String> skills;
+    @CollectionTable(name = "queue_agents", joinColumns = @JoinColumn(name = "queue_id"))
+    @Column(name = "agent_id", nullable = false)
+    private Set<String> agentIds;
 
-    @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private AgentStatus status;
+    private boolean disableSkills;
 
-    private Long lastAssignedTime;
-    private Long lastHeartbeatAt;
-    private String activeCallId;
-
-    @ElementCollection(fetch = FetchType.EAGER)
-    @CollectionTable(name = "agent_queues", joinColumns = @JoinColumn(name = "agent_id"))
-    @Column(name = "queue_id")
-    private Set<String> queueIds;
+    @Column(nullable = false)
+    private String assignmentType; // "FIFO" | "LIFO"
 
     @CreationTimestamp
     private Instant createdAt;

@@ -181,8 +181,20 @@ public class FreeswitchEslService {
                 tenantId = defaultTenantId;
             }
 
-            log.info("Creating internal call for inbound FreeSWITCH call. tenantId={}, caller={}", tenantId, caller);
-            String internalCallId = callServiceClient.createInternalCall(tenantId, caller);
+            String destination = headers.get("Caller-Destination-Number");
+            String campaignId = null;
+            String queueId = null;
+            if (destination != null && !destination.isEmpty()) {
+                com.minigenesys.common.dto.CampaignDto campaign = callServiceClient.getCampaignByDid(tenantId, destination);
+                if (campaign != null) {
+                    campaignId = campaign.getId();
+                    queueId = campaign.getQueueId();
+                }
+            }
+
+            log.info("Creating internal call for inbound FreeSWITCH call. tenantId={}, caller={}, campaignId={}, queueId={}",
+                    tenantId, caller, campaignId, queueId);
+            String internalCallId = callServiceClient.createInternalCall(tenantId, caller, campaignId, queueId);
 
             FreeswitchCallSession session = FreeswitchCallSession.builder()
                     .customerUuid(uuid)

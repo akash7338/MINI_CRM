@@ -16,6 +16,8 @@ import org.springframework.web.server.ResponseStatusException;
 import java.util.Arrays;
 import java.util.List;
 import com.minigenesys.common.dto.CallLifecycleEvent;
+import com.minigenesys.callservice.client.QueueServiceClient;
+import com.minigenesys.common.dto.QueueDto;
 
 @Slf4j
 @Service
@@ -24,10 +26,19 @@ public class CallService {
 
     private final CallRepository callRepository;
     private final CallEventProducer callEventProducer;
+    private final QueueServiceClient queueServiceClient;
 
     @Transactional
     public CallResponse createCall(String tenantId, CreateCallRequest request) {
         Integer priority = request.getPriority() != null ? request.getPriority() : 1;
+
+        boolean disableSkills = false;
+        if (request.getQueueId() != null) {
+            QueueDto queue = queueServiceClient.getQueue(tenantId, request.getQueueId());
+            if (queue != null) {
+                disableSkills = queue.isDisableSkills();
+            }
+        }
 
         Call call = Call.builder()
                 .tenantId(tenantId)
@@ -36,6 +47,9 @@ public class CallService {
                 .priority(priority)
                 .status(CallStatus.QUEUED) // Initial status per requirements
                 .telephonyProvider(request.getTelephonyProvider()) // explicit, never defaulted
+                .campaignId(request.getCampaignId())
+                .queueId(request.getQueueId())
+                .disableSkills(disableSkills)
                 .build();
 
         call = callRepository.save(call);
@@ -46,6 +60,9 @@ public class CallService {
                 .requiredSkills(call.getRequiredSkills())
                 .priority(call.getPriority())
                 .telephonyProvider(call.getTelephonyProvider()) // carry through to routing-service
+                .campaignId(call.getCampaignId())
+                .queueId(call.getQueueId())
+                .disableSkills(call.isDisableSkills())
                 .build();
 
         callEventProducer.publishCallEvent(event);
@@ -93,12 +110,13 @@ public class CallService {
         }
 
         /*
-        if (call.getStatus() != CallStatus.IN_PROGRESS && 
-            call.getStatus() != CallStatus.ROUTED && 
-            call.getStatus() != CallStatus.QUEUED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Call must be in IN_PROGRESS, ROUTED, or QUEUED status to complete");
-        }
-        */
+         * if (call.getStatus() != CallStatus.IN_PROGRESS &&
+         * call.getStatus() != CallStatus.ROUTED &&
+         * call.getStatus() != CallStatus.QUEUED) {
+         * throw new ResponseStatusException(HttpStatus.CONFLICT,
+         * "Call must be in IN_PROGRESS, ROUTED, or QUEUED status to complete");
+         * }
+         */
         if (call.getStatus() != CallStatus.IN_PROGRESS) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Call must be in IN_PROGRESS status to complete");
         }
@@ -166,19 +184,20 @@ public class CallService {
     @Transactional
     public void handleRoutingEvent(RoutingEvent event) {
         log.info("Handling routing event for callId: {}, status: {}", event.getCallId(), event.getStatus());
-        
+
         Call call = callRepository.findById(event.getCallId())
                 .orElseGet(() -> {
                     log.warn("Call not found for ID: {}", event.getCallId());
                     return null;
                 });
 
-        if (call == null) return;
+        if (call == null)
+            return;
 
         // Safety check for tenantId if present in event
         if (event.getTenantId() != null && !call.getTenantId().equals(event.getTenantId())) {
-            log.error("Tenant mismatch for callId: {}. Event tenant: {}, DB tenant: {}", 
-                event.getCallId(), event.getTenantId(), call.getTenantId());
+            log.error("Tenant mismatch for callId: {}. Event tenant: {}, DB tenant: {}",
+                    event.getCallId(), event.getTenantId(), call.getTenantId());
             return;
         }
 
@@ -196,7 +215,7 @@ public class CallService {
         } else if ("ABANDONED".equals(status)) {
             call.setStatus(CallStatus.ABANDONED);
             call.setRoutingFailureReason(event.getMessage());
-            
+
             // If the call was previously routed, free the agent
             if (call.getAssignedAgentId() != null) {
                 CallLifecycleEvent abandonEvent = CallLifecycleEvent.builder()
@@ -219,8 +238,8 @@ public class CallService {
             return;
         }
 
-        log.info("Handling disconnect for agent: {} in tenant: {}. Searching for active calls to recover.", 
-            event.getAgentId(), event.getTenantId());
+        log.info("Handling disconnect for agent: {} in tenant: {}. Searching for active calls to recover.",
+                event.getAgentId(), event.getTenantId());
 
         List<CallStatus> activeStatuses = Arrays.asList(CallStatus.ROUTED, CallStatus.IN_PROGRESS);
         List<Call> activeCalls = callRepository.findByAssignedAgentIdAndStatusIn(event.getAgentId(), activeStatuses);
@@ -233,18 +252,20 @@ public class CallService {
         for (Call call : activeCalls) {
             // Idempotency: skip if already requeued by a previous delivery of this event
             if (call.getStatus() == CallStatus.QUEUED) {
-                log.info("Call {} already requeued for agent {}. Skipping duplicate.", call.getId(), event.getAgentId());
+                log.info("Call {} already requeued for agent {}. Skipping duplicate.", call.getId(),
+                        event.getAgentId());
                 continue;
             }
 
-            log.info("Recovering call: {} from disconnected agent: {}. Requeuing.", 
-                call.getId(), event.getAgentId());
+            log.info("Recovering call: {} from disconnected agent: {}. Requeuing.",
+                    call.getId(), event.getAgentId());
 
             call.setStatus(CallStatus.QUEUED);
             call.setAssignedAgentId(null);
             callRepository.save(call);
 
-            // Publish CALL_REQUEUED (same as initial call event but for routing-service to pick it up)
+            // Publish CALL_REQUEUED (same as initial call event but for routing-service to
+            // pick it up)
             CallEvent requeueEvent = CallEvent.builder()
                     .callId(call.getId())
                     .tenantId(call.getTenantId())
@@ -270,6 +291,9 @@ public class CallService {
                 .assignedAgentId(call.getAssignedAgentId())
                 .routingFailureReason(call.getRoutingFailureReason())
                 .telephonyProvider(call.getTelephonyProvider())
+                .campaignId(call.getCampaignId())
+                .queueId(call.getQueueId())
+                .disableSkills(call.isDisableSkills())
                 .createdAt(call.getCreatedAt())
                 .updatedAt(call.getUpdatedAt())
                 .build();

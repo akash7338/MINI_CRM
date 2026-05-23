@@ -248,10 +248,22 @@ public class AgentStateService {
                 String skillKey = String.format(SKILL_KEY_TPL, agent.getTenantId(), skill);
                 redisTemplate.opsForZSet().add(skillKey, agent.getId(), score);
             }
+            if (agent.getQueueIds() != null) {
+                for (String queueId : agent.getQueueIds()) {
+                    String queueKey = String.format("tenant:%s:queue:%s:available", agent.getTenantId(), queueId);
+                    redisTemplate.opsForZSet().add(queueKey, agent.getId(), score);
+                }
+            }
         } else if (newStatus == AgentStatus.BUSY || newStatus == AgentStatus.OFFLINE) {
             for (String skill : agent.getSkills()) {
                 String skillKey = String.format(SKILL_KEY_TPL, agent.getTenantId(), skill);
                 redisTemplate.opsForZSet().remove(skillKey, agent.getId());
+            }
+            if (agent.getQueueIds() != null) {
+                for (String queueId : agent.getQueueIds()) {
+                    String queueKey = String.format("tenant:%s:queue:%s:available", agent.getTenantId(), queueId);
+                    redisTemplate.opsForZSet().remove(queueKey, agent.getId());
+                }
             }
         }
 
