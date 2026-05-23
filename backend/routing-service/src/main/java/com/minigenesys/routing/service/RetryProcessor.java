@@ -101,9 +101,9 @@ public class RetryProcessor {
                     callId, result.getStatus(), newCount, MAX_RETRIES,
                     FIBONACCI_BACKOFF_MS[(int) Math.min(newCount, FIBONACCI_BACKOFF_MS.length - 1)]);
 
-                // If NO_AGENT, stop this tenant's queue — lower priority calls won't match either
+                // If NO_AGENT, continue to the next call in the queue
                 if ("NO_AGENT".equals(result.getStatus())) {
-                    break;
+                    continue;
                 }
             }
         }

@@ -35,13 +35,18 @@ public class RoutingEngine {
         "local timestamp = ARGV[3]; " +
         "local tempSet = 'temp:routing:' .. ARGV[4]; " +
         "redis.call('ZINTERSTORE', tempSet, #KEYS, unpack(KEYS)); " +
-        "local agent = redis.call('ZRANGE', tempSet, 0, 0)[1]; " +
+        "local agents = redis.call('ZRANGE', tempSet, 0, -1); " +
         "redis.call('DEL', tempSet); " +
-        "if agent then " +
-        "  for i, key in ipairs(KEYS) do redis.call('ZREM', key, agent) end; " +
+        "for _, agent in ipairs(agents) do " +
         "  local stateKey = string.format(agentStateTpl, tenantId, agent); " +
-        "  redis.call('HSET', stateKey, 'status', 'BUSY', 'lastAssignedTime', timestamp); " +
-        "  return agent; " +
+        "  local status = redis.call('HGET', stateKey, 'status'); " +
+        "  if status == 'AVAILABLE' then " +
+        "    for i, key in ipairs(KEYS) do redis.call('ZREM', key, agent) end; " +
+        "    redis.call('HSET', stateKey, 'status', 'BUSY', 'lastAssignedTime', timestamp); " +
+        "    return agent; " +
+        "  else " +
+        "    for i, key in ipairs(KEYS) do redis.call('ZREM', key, agent) end; " +
+        "  end " +
         "end; " +
         "return nil; ";
 

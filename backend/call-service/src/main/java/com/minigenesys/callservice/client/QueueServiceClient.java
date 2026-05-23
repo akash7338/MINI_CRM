@@ -3,6 +3,7 @@ package com.minigenesys.callservice.client;
 import com.minigenesys.common.dto.QueueDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -15,6 +16,9 @@ import org.springframework.web.client.RestTemplate;
 @Slf4j
 public class QueueServiceClient {
     private final RestTemplate restTemplate;
+
+    @Value("${services.agent-state.url:http://localhost:8086}")
+    private String agentStateServiceUrl;
     
     public QueueDto getQueue(String tenantId, String queueId) {
         try {
@@ -23,7 +27,7 @@ public class QueueServiceClient {
             HttpEntity<Void> entity = new HttpEntity<>(headers);
             
             ResponseEntity<QueueDto> response = restTemplate.exchange(
-                "http://localhost:8086/api/v1/queues/" + queueId,
+                agentStateServiceUrl + "/api/v1/queues/" + queueId,
                 HttpMethod.GET,
                 entity,
                 QueueDto.class

@@ -18,6 +18,7 @@ import java.util.List;
 import com.minigenesys.common.dto.CallLifecycleEvent;
 import com.minigenesys.callservice.client.QueueServiceClient;
 import com.minigenesys.common.dto.QueueDto;
+import com.minigenesys.callservice.repository.CampaignRepository;
 
 @Slf4j
 @Service
@@ -27,17 +28,24 @@ public class CallService {
     private final CallRepository callRepository;
     private final CallEventProducer callEventProducer;
     private final QueueServiceClient queueServiceClient;
+    private final CampaignRepository campaignRepository;
 
     @Transactional
     public CallResponse createCall(String tenantId, CreateCallRequest request) {
         Integer priority = request.getPriority() != null ? request.getPriority() : 1;
 
+        if (request.getCampaignId() != null) {
+            campaignRepository.findByIdAndTenantId(request.getCampaignId(), tenantId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid campaign ID: " + request.getCampaignId()));
+        }
+
         boolean disableSkills = false;
         if (request.getQueueId() != null) {
             QueueDto queue = queueServiceClient.getQueue(tenantId, request.getQueueId());
-            if (queue != null) {
-                disableSkills = queue.isDisableSkills();
+            if (queue == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid queue ID: " + request.getQueueId());
             }
+            disableSkills = queue.isDisableSkills();
         }
 
         Call call = Call.builder()

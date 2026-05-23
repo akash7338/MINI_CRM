@@ -1,16 +1,19 @@
 package com.minigenesys.agentstate.controller;
 
+import com.minigenesys.agentstate.model.AgentStatus;
 import com.minigenesys.agentstate.model.Queue;
 import com.minigenesys.agentstate.repository.AgentRepository;
 import com.minigenesys.agentstate.repository.QueueRepository;
 import com.minigenesys.common.dto.QueueDto;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -23,6 +26,7 @@ public class QueueController {
 
     private final QueueRepository queueRepository;
     private final AgentRepository agentRepository;
+    private final StringRedisTemplate redisTemplate;
 
     @PostMapping
     @Transactional
@@ -50,6 +54,13 @@ public class QueueController {
                     }
                     agent.getQueueIds().add(queueId);
                     agentRepository.save(agent);
+
+                    // Sync Redis available set if agent is AVAILABLE
+                    if (agent.getStatus() == AgentStatus.AVAILABLE) {
+                        long score = agent.getLastAssignedTime() != null ? agent.getLastAssignedTime() : Instant.now().toEpochMilli();
+                        String queueKey = String.format("tenant:%s:queue:%s:available", tenantId, queueId);
+                        redisTemplate.opsForZSet().add(queueKey, agentId, score);
+                    }
                 });
             }
         }
@@ -105,6 +116,9 @@ public class QueueController {
                         agentRepository.save(agent);
                     }
                 });
+                // Remove agent from the queue's available set in Redis immediately
+                String queueKey = String.format("tenant:%s:queue:%s:available", tenantId, id);
+                redisTemplate.opsForZSet().remove(queueKey, agentId);
             }
         }
 
@@ -117,6 +131,13 @@ public class QueueController {
                     }
                     agent.getQueueIds().add(id);
                     agentRepository.save(agent);
+
+                    // Add agent to the queue's available set in Redis immediately if they are AVAILABLE
+                    if (agent.getStatus() == AgentStatus.AVAILABLE) {
+                        long score = agent.getLastAssignedTime() != null ? agent.getLastAssignedTime() : Instant.now().toEpochMilli();
+                        String queueKey = String.format("tenant:%s:queue:%s:available", tenantId, id);
+                        redisTemplate.opsForZSet().add(queueKey, agentId, score);
+                    }
                 });
             }
         }
@@ -145,6 +166,11 @@ public class QueueController {
         }
 
         queueRepository.delete(queue);
+
+        // Delete the queue's availability set from Redis
+        String queueKey = String.format("tenant:%s:queue:%s:available", tenantId, id);
+        redisTemplate.delete(queueKey);
+
         return ResponseEntity.noContent().build();
     }
 

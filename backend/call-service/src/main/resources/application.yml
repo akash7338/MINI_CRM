@@ -33,3 +33,7 @@ server:
 logging:
   level:
     com.minigenesys.callservice: DEBUG
+
+services:
+  agent-state:
+    url: ${AGENT_STATE_SERVICE_URL:http://localhost:8086}
