@@ -4,19 +4,104 @@
   and parks the channel to await routing instructions from our routing service via ESL.
 -->
 <include>
+  <!--
+    FreeSWITCH loads this file and merges its contents into the main dialplan.
+    Using <include> keeps dialplan rules modular — each file owns a specific concern
+    rather than having one giant dialplan file.
+  -->
+
   <context name="public">
+    <!--
+      A "context" is a named bucket of call-routing rules (extensions).
+      "public" is the conventional name for rules that handle calls arriving
+      from the outside world (SIP trunks, PSTN carriers).
+      Our sofia.conf.xml external profile routes all inbound carrier calls
+      into this context via: <param name="context" value="public"/>
+    -->
+
     <extension name="agent_ans">
+      <!--
+        A MOCK / TEST extension used during development.
+        When our Java code calls originate with dialString "loopback/agent_ans/public",
+        FreeSWITCH routes that internal loopback call here.
+        This simulates a real SIP agent (hardphone/softphone) picking up the phone,
+        without needing an actual SIP device registered.
+        In production, this would be replaced by a real sofia/internal/sip:<agentId>@<proxy> dial string.
+      -->
       <condition field="destination_number" expression="^agent_ans$">
+        <!--
+          Matches ONLY when the dialed number is exactly "agent_ans".
+          ^ and $ are regex anchors (start and end), so "agent_ans123" would NOT match.
+        -->
+
         <action application="answer"/>
+        <!--
+          Tells FreeSWITCH to answer (accept) the incoming call leg.
+          This is critical: until "answer" is executed, the call is still ringing.
+          Once answered, the originate command's "&conference(...)" instruction kicks in
+          and FreeSWITCH bridges this mock-agent leg into the customer's conference room.
+        -->
+
         <action application="sleep" data="60000"/>
+        <!--
+          Keeps the call leg alive for 60 seconds (60000 milliseconds) after answering.
+          This prevents FreeSWITCH from immediately hanging up the mock agent's channel.
+          In a real agent flow, the SIP device itself keeps the line open.
+          Here, sleep acts as a stand-in to hold the channel open long enough
+          for the conference bridge to work and for testing purposes.
+        -->
       </condition>
     </extension>
+
     <extension name="inbound_pstn">
+      <!--
+        The MAIN inbound rule — this is where every real incoming customer call lands.
+        It matches ALL destination numbers (any DID on our carrier/trunk),
+        performs a brief answer + ringback tone, and then "parks" the call.
+        A parked call is essentially held in a waiting state inside FreeSWITCH.
+        FreeSWITCH fires a CHANNEL_PARK event, which our freeswitch-service picks up
+        via ESL, looks up the campaign/queue/agent, and issues routing commands.
+      -->
       <condition field="destination_number" expression="^(.*)$">
+        <!--
+          Matches ANY destination number using the wildcard regex (.*).
+          The parentheses capture the matched number into $1,
+          which could be used in subsequent actions if needed.
+          This rule MUST come AFTER agent_ans, because FreeSWITCH evaluates
+          extensions top-to-bottom and stops at the first match —
+          if this were first, it would swallow the "agent_ans" calls too.
+        -->
+
         <action application="answer"/>
+        <!--
+          Answers the inbound call from the carrier.
+          This establishes the media path (RTP audio stream) with the caller.
+          Without this, no audio can flow and subsequent actions won't work.
+        -->
+
         <action application="playback" data="tone_stream://%(1000,0,800)"/>
+        <!--
+          Plays a single 1-second ringback tone at 800 Hz to the caller while we set up routing.
+          tone_stream format: %(duration_ms, silence_ms, freq_hz)
+          %(1000,0,800) = 1000ms tone, 0ms silence, 800Hz frequency.
+          This gives the caller audio feedback that the call connected,
+          rather than dead silence which could feel like a dropped call.
+        -->
+
         <action application="park"/>
+        <!--
+          Parks the call — puts it in a holding state inside FreeSWITCH.
+          This is the key trigger for our routing system:
+            1. FreeSWITCH fires a CHANNEL_PARK ESL event with the call's UUID and caller details.
+            2. Our freeswitch-service Java app receives this event via its ESL socket listener.
+            3. It calls call-service to create a Call record and find a matching campaign/queue.
+            4. routing-service picks an available agent from Redis.
+            5. freeswitch-service issues:
+               a. uuid_transfer to move the customer into a conference room.
+               b. originate to dial the agent and drop them into the same conference room.
+        -->
       </condition>
     </extension>
+
   </context>
 </include>
