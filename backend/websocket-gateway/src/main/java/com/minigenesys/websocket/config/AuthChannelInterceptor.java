@@ -31,26 +31,21 @@ public class AuthChannelInterceptor implements ChannelInterceptor {
             if (authHeader != null && authHeader.startsWith("Bearer ")) {
                 String token = authHeader.substring(7);
                 try {
-                    if (jwtUtil.validateToken(token)) {
-                        Claims claims = jwtUtil.getAllClaimsFromToken(token);
-                        String tenantId = claims.get("tenantId", String.class);
-                        String userId = claims.getSubject();
+                    Claims claims = jwtUtil.getAllClaimsFromToken(token);
+                    String tenantId = claims.get("tenantId", String.class);
+                    String userId = claims.getSubject();
 
-                        UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
-                                userId, null, Collections.emptyList());
-                        
-                        // Store tenantId in session attributes
-                        if (accessor.getSessionAttributes() != null) {
-                            accessor.getSessionAttributes().put("tenantId", tenantId);
-                        }
-                        accessor.setUser(auth);
-                        log.info("WebSocket connected for user {} in tenant {}", userId, tenantId);
-                    } else {
-                        log.warn("Invalid WebSocket token");
-                        throw new IllegalArgumentException("Unauthorized");
+                    UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
+                            userId, null, Collections.emptyList());
+                    
+                    // Store tenantId in session attributes
+                    if (accessor.getSessionAttributes() != null) {
+                        accessor.getSessionAttributes().put("tenantId", tenantId);
                     }
+                    accessor.setUser(auth);
+                    log.info("WebSocket connected for user {} in tenant {}", userId, tenantId);
                 } catch (Exception e) {
-                    log.error("WebSocket auth error: {}", e.getMessage());
+                    log.error("WebSocket auth token validation failed: {}", e.getMessage(), e);
                     throw new IllegalArgumentException("Unauthorized");
                 }
             } else {

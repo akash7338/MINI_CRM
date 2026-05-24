@@ -17,7 +17,9 @@ import com.minigenesys.telephony.client.CallServiceClient;
 import com.minigenesys.common.dto.RoutingEvent;
 import com.minigenesys.common.dto.TelephonyEvent;
 import com.minigenesys.telephony.model.TelephonyCallSession;
+import com.minigenesys.telephony.model.PhoneNumberMapping;
 import com.minigenesys.telephony.repository.TelephonyRepository;
+import com.minigenesys.telephony.repository.PhoneNumberMappingRepository;
 
 @Service
 @RequiredArgsConstructor
@@ -26,6 +28,7 @@ public class TelephonyService {
     private final TelephonyRepository repository;
     private final CallServiceClient callServiceClient;
     private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final PhoneNumberMappingRepository phoneNumberMappingRepository;
 
     @Value("${twilio.accountSid}")
     private String accountSid;
@@ -42,19 +45,28 @@ public class TelephonyService {
     public void handleInboundCall(String callSid, String from, String to, String tenantId) {
         log.info("Handling inbound call from {} to {} with SID {} for tenant {}", from, to, callSid, tenantId);
 
-        // 1. Idempotency Check: Don't create a new call if we already have one for this
-        // SID
+        // 1. Resolve tenantId generically using the phone number mapping registry
+        String resolvedTenantId = tenantId;
+        Optional<PhoneNumberMapping> mapping = phoneNumberMappingRepository.findById(to);
+        if (mapping.isPresent()) {
+            resolvedTenantId = mapping.get().getTenantId();
+            log.info("Generically resolved tenantId for dialed number {}: {}", to, resolvedTenantId);
+        } else {
+            log.warn("No registry mapping found for dialed number {}. Using default tenantId: {}", to, tenantId);
+        }
+
+        // 2. Idempotency Check: Don't create a new call if we already have one for this SID
         Optional<TelephonyCallSession> existing = repository.findByTwilioCallSid(callSid);
         if (existing.isPresent()) {
             log.info("Call SID {} already exists, skipping creation.", callSid);
             return;
         }
 
-        // 2. REST call outside @Transactional to avoid holding DB connections
-        String internalCallId = callServiceClient.createInternalCall(tenantId, from);
+        // 3. REST call outside @Transactional to avoid holding DB connections
+        String internalCallId = callServiceClient.createInternalCall(resolvedTenantId, from);
 
-        // 3. Save session in a localized transaction
-        saveNewSession(callSid, internalCallId, from, to, tenantId);
+        // 4. Save session in a localized transaction with the resolved tenantId
+        saveNewSession(callSid, internalCallId, from, to, resolvedTenantId);
     }
 
     @Transactional

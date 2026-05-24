@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# Load environment variables (Twilio creds, DB overrides, etc.)
+ENV_FILE="$HOME/.envs/minigenesys.env"
+if [ -f "$ENV_FILE" ]; then
+    source "$ENV_FILE"
+    echo "✅ Loaded env vars from $ENV_FILE"
+else
+    echo "⚠️  WARNING: $ENV_FILE not found. Services will start with dummy defaults."
+fi
+
 # Create logs directory if not exists
 mkdir -p logs
 
@@ -10,10 +19,9 @@ start_service() {
     local dir=$1
     local name=$2
     echo "Starting $name..."
-    cd "$dir"
-    ./gradlew bootRun > "../logs/$name.log" 2>&1 &
-    echo $! > "../logs/$name.pid"
-    cd ..
+    # With a root multi-project build, we run the gradle wrapper from the root directory
+    ./gradlew :$name:bootRun > "logs/$name.log" 2>&1 &
+    echo $! > "logs/$name.pid"
     sleep 2 # Let it start initializing
 }
 

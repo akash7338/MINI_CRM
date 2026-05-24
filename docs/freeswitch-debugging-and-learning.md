@@ -70,6 +70,20 @@ This document serves as a comprehensive operational reference for managing, debu
 * **Discovery**: Confirmed that the `internal` profile was running and binding to ports `5060` (SIP) and `5066` (WS).
 * **Follow-up / Fix**: Modified XML profiles to load only necessary profiles, keeping configurations clean.
 
+### Verify External Gateway Registration (e.g. Telnyx)
+* **Command**: 
+  ```bash
+  # Restart the container to apply new XML credentials
+  docker restart minigenesys-freeswitch-mvp
+  
+  # Check if the gateway is registered
+  docker exec minigenesys-freeswitch-mvp fs_cli -x "sofia status"
+  ```
+* **Purpose**: After adding SIP trunk credentials (like Telnyx) to `sofia.conf.xml`, verify that FreeSWITCH successfully negotiated the connection with the carrier.
+* **Issue Investigated**: Inbound/outbound calls failing because FreeSWITCH hasn't authenticated with the SIP provider.
+* **Discovery**: Look for the gateway in the output. If it says `REGED`, the tunnel is open and ready. If it says `NOREG` or `FAIL_WAIT`, credentials or network routing are incorrect.
+* **Follow-up / Fix**: Used `docker restart` instead of `reloadxml` to ensure the entire Sofia SIP stack re-initialized and sent a fresh `REGISTER` packet to the carrier.
+
 ---
 
 ## 5. XML Reload & Configuration Verification

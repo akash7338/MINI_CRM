@@ -13,12 +13,12 @@ import java.util.Set;
 public class CallRequest {
     @NotBlank(message = "tenantId is mandatory")
     private String tenantId;
-    
+
     @NotBlank(message = "callId is mandatory")
     private String callId;
-    
+
     @NotEmpty(message = "requiredSkills cannot be empty")
     private Set<String> requiredSkills;
-    
+
     private long priority;
 }

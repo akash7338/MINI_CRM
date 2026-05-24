@@ -9,11 +9,18 @@
   </advertise>
   <profiles>
     <profile name="default">
+      <!-- Sets audio mixing rate to standard PSTN telephone quality (8kHz) -->
       <param name="rate" value="8000"/>
+      
+      <!-- Noise Gate / VAD: Mutes participants if their mic volume drops below 300 to prevent static hiss -->
       <param name="energy-level" value="300"/>
+      
+      <!-- Distribute DTMF: Forwards keypad beep tones (e.g., pressing 1) through to the agent -->
       <param name="confflags" value="dist-dtmf"/>
-      <!-- Automatically terminate other participants (the agent) when the customer (creator) hangs up -->
+      
+      <!-- Cleanup Safety Net: Gives remaining participants 5 seconds before destroying the room when it ends -->
       <param name="endconf-grace-time" value="5"/>
     </profile>
   </profiles>
 </configuration>
+

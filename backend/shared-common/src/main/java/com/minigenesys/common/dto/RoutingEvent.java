@@ -15,4 +15,5 @@ public class RoutingEvent {
     private String tenantId;
     private String status;
     private String message;
+    private String telephonyProvider;
 }
