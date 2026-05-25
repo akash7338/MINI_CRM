@@ -707,6 +707,27 @@ If a call is already active/bridged (`IN_PROGRESS`), the telephony customer leg 
 - **`CallService.java`**: Implemented case separation in `handleAgentDisconnect` and early exit for terminal states in `completeCall`.
 - **`AgentStateService.java`**: Added safety check in `handleCallCompletion` to ignore completion transitions for `OFFLINE` agents.
 
+
+---
+
+## Inbound Dialplan & Frontend Presence Desynchronization Fixes
+*2026-05-25 — Ringing & Presence Bug Fixes*
+
+### 1. Inbound Dialplan Blockage (Ringing Sound)
+- **Problem**: When `mod_tone_stream` was loaded, the inbound dialplan action `<action application="playback" data="tone_stream://%(1000,0,800)"/>` played a tone stream indefinitely, blocking the call from reaching the `park` application. As a result, the call never reached the routing service or the agent.
+- **Fix**: Commented out the blocking `playback` action in `public.xml`. The customer leg now immediately parks and is routed to the conference.
+- **Ringback Implementation**: Enabled a standard US ringback tone in the conference room using `moh-sound` in `conference.conf.xml`:
+  `<param name="moh-sound" value="tone_stream://%(2000,4000,440,480)"/>`
+  This plays a ringing sound to the caller while they wait inside the conference room for the agent to answer the WebRTC call.
+
+### 2. Frontend Status Desynchronization on Call Rejection
+- **Problem**: When an agent rejected a call, the frontend overlay logged out the agent to set their status to `Offline` (so they wouldn't immediately get routed the same call again). However, when the backend processed the rejection, it sent a `CALL_COMPLETED` lifecycle event. The frontend received this event and unconditionally changed the agent UI status to `Ready`, causing a mismatch since the backend database and Redis still had the agent as `OFFLINE`. The desynchronized agent couldn't receive any more calls.
+- **Fix**: Updated `session-state.service.ts` to only transition the agent status to `Ready` on `CALL_COMPLETED` if the agent's current status is not `Offline`. Now, after rejecting a call, the agent correctly remains `Offline` in the UI and can log back in by clicking "Start Shift".
+
+### Files Changed
+- **`public.xml`**: Commented out the blocking playback tone stream.
+- **`session-state.service.ts`**: Added presence guard to the `CALL_COMPLETED` WebSocket handler.
+
 ---
 
 ## Current Status
