@@ -79,13 +79,16 @@
           Without this, no audio can flow and subsequent actions won't work.
         -->
 
-        <action application="playback" data="tone_stream://%(1000,0,800)"/>
         <!--
+          <action application="playback" data="tone_stream://%(1000,0,800)"/>
           Plays a single 1-second ringback tone at 800 Hz to the caller while we set up routing.
           tone_stream format: %(duration_ms, silence_ms, freq_hz)
           %(1000,0,800) = 1000ms tone, 0ms silence, 800Hz frequency.
           This gives the caller audio feedback that the call connected,
           rather than dead silence which could feel like a dropped call.
+          NOTE: Commented out because tone_stream will block dialplan execution indefinitely
+          unless loops is specified, which prevents the call from hitting the "park" application.
+          Ringback is instead handled by the conference moh-sound while dialing the agent.
         -->
 
         <action application="park"/>

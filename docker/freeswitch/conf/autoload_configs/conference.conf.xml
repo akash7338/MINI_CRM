@@ -20,6 +20,9 @@
       
       <!-- Cleanup Safety Net: Gives remaining participants 5 seconds before destroying the room when it ends -->
       <param name="endconf-grace-time" value="5"/>
+
+      <!-- Ringback tone played to the caller while they are alone in the conference waiting for the agent -->
+      <param name="moh-sound" value="tone_stream://%(2000,4000,440,480)"/>
     </profile>
   </profiles>
 </configuration>
