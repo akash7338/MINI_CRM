@@ -139,6 +139,51 @@ FreeSWITCH logic lives in its own dedicated microservice called **`freeswitch-se
 | Twilio flow | 100% untouched — `telephony-service` still processes `routing-events` from Kafka but silently ignores FreeSWITCH sessions |
 | Call session state | Local DB table inside `freeswitch-service` maps FreeSWITCH channel UUIDs to internal call IDs |
 
+### FreeSWITCH Docker Fixes
+
+When running FreeSWITCH in Docker on Mac, several strict NAT traversal settings are required to force FreeSWITCH to communicate externally with WebRTC ICE instead of dropping local LAN candidates.
+
+#### `sofia.conf.xml`
+
+**1. `ndlb-force-ctx-ip`**
+Docker masquerades the incoming WSS (WebSockets Secure) TCP connection, making the SIP request appear as if it comes from the local Docker bridge gateway (`172.18.0.1`). FreeSWITCH's core engine detects this and assumes it is a strictly local call, overriding external IPs and substituting `172.18.0.2` in the SDP offer. Setting `ndlb-force-ctx-ip` to `true` disables this destructive fallback, forcing FreeSWITCH to always advertise the `ext-rtp-ip` contact IP.
+
+```xml
+<param name="ndlb-force-ctx-ip" value="true"/>
+```
+
+**2. `apply-candidate-acl`**
+When `ext-rtp-ip` is configured, FreeSWITCH acts as an external endpoint. In this mode, its ICE candidate filter drops any private (RFC1918) candidates by default. Since our browser is on the local LAN (e.g. `192.168.1.4`), FreeSWITCH drops the candidate, resulting in `no suitable candidates found`. We bypass this by explicitly telling the candidate filter to accept the LAN ACL list.
+
+```xml
+<param name="apply-candidate-acl" value="lan"/>
+```
+
+**3. `ext-rtp-ip`**
+Instead of using STUN (which advertises the public ISP IP and breaks local network traversal), we explicitly pass the local Mac IP via Docker Compose environment variable so FreeSWITCH advertises a reachable path.
+
+```xml
+<param name="ext-rtp-ip" value="$${FREESWITCH_EXT_IP}"/>
+<param name="ext-sip-ip" value="$${FREESWITCH_EXT_IP}"/>
+```
+
+#### `docker-compose.yml`
+
+**1. RTP Port Mapping**
+FreeSWITCH's `switch.conf.xml` explicitly defines RTP ports `16384` to `16400`. The Docker port mappings must exactly match this range for UDP traffic to traverse into the container.
+
+```yaml
+    ports:
+      - "16384-16400:16384-16400/udp"
+```
+
+**2. FREESWITCH_EXT_IP Environment Variable**
+Passes the host's LAN IP to FreeSWITCH.
+```yaml
+    environment:
+      - FREESWITCH_EXT_IP=${FREESWITCH_EXT_IP:-192.168.1.4}
+```
+
 ---
 
 ## Phase 1 — FreeSWITCH Docker & Configuration

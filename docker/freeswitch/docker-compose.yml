@@ -4,13 +4,15 @@ services:
   freeswitch_mvp:
     image: bytedesk/freeswitch:latest
     container_name: minigenesys-freeswitch-mvp
+    environment:
+      - FREESWITCH_EXT_IP=${FREESWITCH_EXT_IP:-192.168.1.4} # Passed to FreeSWITCH to advertise correct external RTP/SIP IP
     ports:
       - "5062:5060/udp"    # FreeSWITCH SIP port for inbound/outbound carrier trunk simulation
       - "5062:5060/tcp"    # FreeSWITCH SIP port for inbound/outbound carrier trunk simulation
       - "8022:8021/tcp"    # FreeSWITCH ESL (Event Socket Library) interface
       - "7443:7443/tcp"    # FreeSWITCH WSS (WebSocket Secure) port for WebRTC
       - "5066:5066/tcp"    # FreeSWITCH WS (WebSocket) port for WebRTC
-      - "16410-16426:16384-16400/udp" # FreeSWITCH RTP ports for call audio media transmission - multiple calls per port 
+      - "16384-16400:16384-16400/udp" # FreeSWITCH RTP ports for call audio media transmission - multiple calls per port 
     volumes:
       - ./conf:/usr/local/freeswitch/etc/freeswitch # Mounted custom FreeSWITCH configuration directory
       - ./recordings:/var/lib/freeswitch/recordings # Mounted volume for call recordings

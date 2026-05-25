@@ -50,19 +50,27 @@ public class RetryProcessor {
         for (String callId : callIds) {
             long retryCount = queueManager.getRetryCount(tenantId, callId);
 
-            // 1. Check max retries
+            // 1. Load call data early
+            CallRequest call = queueManager.getCallRequest(tenantId, callId);
+            if (call == null) {
+                log.warn("Call {} has no payload in Redis. Cleaning up.", callId);
+                queueManager.dequeue(tenantId, callId);
+                continue;
+            }
+
+            // 2. Check max retries
             if (retryCount >= MAX_RETRIES) {
                 log.warn("Call {} in tenant {} exceeded max retries ({}). Abandoning.",
                     callId, tenantId, MAX_RETRIES);
                 queueManager.dequeue(tenantId, callId);
                 kafkaMessaging.produceRoutingEvent(
                     AssignmentResult.failure(callId, tenantId, "ABANDONED",
-                        "Max retries exceeded. Call abandoned.")
+                        "Max retries exceeded. Call abandoned.", call.getTelephonyProvider())
                 );
                 continue;
             }
 
-            // 2. Check backoff using real timestamps
+            // 3. Check backoff using real timestamps
             long lastRetryAt = queueManager.getLastRetryTime(tenantId, callId);
             long now = System.currentTimeMillis();
             int backoffIndex = (int) Math.min(retryCount, FIBONACCI_BACKOFF_MS.length - 1);
@@ -72,14 +80,6 @@ public class RetryProcessor {
             if (lastRetryAt > 0 && elapsed < requiredBackoffMs) {
                 log.debug("Call {} backoff not elapsed: elapsed={}ms, required={}ms, retry={}/{}",
                     callId, elapsed, requiredBackoffMs, retryCount, MAX_RETRIES);
-                continue;
-            }
-
-            // 3. Load call data
-            CallRequest call = queueManager.getCallRequest(tenantId, callId);
-            if (call == null) {
-                log.warn("Call {} has no payload in Redis. Cleaning up.", callId);
-                queueManager.dequeue(tenantId, callId);
                 continue;
             }
 

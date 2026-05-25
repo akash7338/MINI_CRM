@@ -5,4 +5,19 @@
 -->
 <include>
   <!-- Minimal vars placeholder -->
+
+  <!-- 
+    =============================================================================
+    WebRTC / NAT Traversal Configuration
+    =============================================================================
+    When running FreeSWITCH in Docker, OS environment variables are stripped by 
+    the entrypoint. We define `external_rtp_ip` here so sofia.conf.xml can use it.
+    
+    For local development, hardcode this to your Mac's LAN IP (e.g. 192.168.1.x)
+    so the browser can route ICE candidates properly.
+    
+    In production, use a startup script (or sed) to dynamically inject the 
+    container's public elastic IP here on boot.
+  -->
+  <X-PRE-PROCESS cmd="set" data="external_rtp_ip=192.168.1.4"/>
 </include>

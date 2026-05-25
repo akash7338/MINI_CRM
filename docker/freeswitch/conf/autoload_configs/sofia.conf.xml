@@ -12,36 +12,47 @@
       <settings>
         <param name="debug" value="0"/>
         <param name="sip-ip" value="0.0.0.0"/>  <!-- 0.0.0.0 tells FreeSWITCH to listen for SIP signaling (INVITE, ACK, etc.) on all interfaces.  -->
-        <param name="ext-sip-ip" value="auto"/>  <!-- tells FreeSWITCH to automatically detect its external IP address -->
+        <param name="ext-sip-ip" value="stun:stun.l.google.com:19302"/>  <!-- tells FreeSWITCH to automatically detect its external IP address via STUN -->
         <param name="rtp-ip" value="0.0.0.0"/> <!-- 0.0.0.0 tells FreeSWITCH to listen for media (RTP) traffic on all available network interfaces inside the container. -->
-        <param name="ext-rtp-ip" value="auto"/> <!-- tells FreeSWITCH to automatically detect its external IP address for media traffic -->
+        <param name="ext-rtp-ip" value="stun:stun.l.google.com:19302"/> <!-- tells FreeSWITCH to automatically detect its external IP address for media traffic via STUN -->
         <param name="sip-port" value="5060"/> <!-- Standard SIP port for incoming/outgoing calls over the PSTN/SIP trunks. -->
         <param name="dialplan" value="XML"/> <!-- Tells FreeSWITCH to load dialplans from XML files in the dialplan directory. -->
         <param name="context" value="public"/> <!--When a SIP call enters this profile, send the call into dialplan context named public . -->
       </settings>
       <gateways>
         <!-- Placeholder for future carrier integration (e.g. Sinch/Bandwidth/Telnyx) -->
-        <!--
-        <gateway name="carrier_gateway">
-          <param name="username" value="username_placeholder"/>
-          <param name="password" value="password_placeholder"/>
-          <param name="proxy" value="sip.carrier.com"/>
+        
+        <gateway name="telnyx">
+          <param name="username" value="usermailakashkrsingh64252"/>
+          <param name="password" value="wI2=rCcUVMvk"/>
+          <param name="proxy" value="sip.telnyx.com"/>
           <param name="register" value="true"/>
+          <param name="register-transport" value="tcp"/>
+          <param name="ping" value="25"/> <!-- Keep NAT port mapping open -->
         </gateway>
-        -->
+       
       </gateways>
     </profile>
 
     <profile name="internal"> <!-- Used for internal traffic, such as WebRTC clients and applications inside the same network. -->
       <settings>
         <param name="debug" value="0"/>
-        <param name="sip-ip" value="0.0.0.0"/> <!-- 0.0.0.0 tells FreeSWITCH to listen for SIP signaling (INVITE, ACK, etc.) on all interfaces. -->
-        <param name="ext-sip-ip" value="auto"/>  <!-- tells FreeSWITCH to automatically detect its external IP address -->
-        <param name="rtp-ip" value="0.0.0.0"/> <!-- 0.0.0.0 tells FreeSWITCH to listen for media (RTP) traffic on all available network interfaces inside the container. -->
-        <param name="ext-rtp-ip" value="auto"/> <!-- tells FreeSWITCH to automatically detect its external IP address for media traffic -->
+        <param name="sip-ip" value="0.0.0.0"/> <!-- Listen on all interfaces for SIP signaling -->
+        <param name="ext-sip-ip" value="$${external_rtp_ip}"/>  <!-- External IP for SIP, e.g. 192.168.1.4 -->
+        <param name="local-network-acl" value="localnet.auto"/> <!-- Allow local LAN candidates for direct ICE connection -->
+        <param name="apply-candidate-acl" value="lan"/> <!-- explicitly allow browser private IP in ICE -->
+        <param name="rtcp-mux" value="true"/> <!-- Force RTCP Multiplexing for WebRTC clients -->
+        <param name="rtcp_mux" value="true"/> <!-- Underscore compatibility fallback -->
+        <param name="rtp-ip" value="0.0.0.0"/> <!-- Listen for RTP on all interfaces inside container -->
+        <param name="ext-rtp-ip" value="$${external_rtp_ip}"/> <!-- External IP for RTP, e.g. 192.168.1.4 -->
+        <param name="ndlb-force-ctx-ip" value="true"/> <!-- Force ext-rtp-ip even if SIP connection appears local (Docker gateway) -->
+        <param name="codec-prefs" value="opus,PCMU,PCMA,G722"/> <!-- WebRTC-compatible codecs only; SPEEX removed (Chrome rejects it) -->
+        <param name="inbound-codec-prefs" value="opus,PCMU,PCMA,G722"/> <!-- Same for inbound leg -->
+        <param name="outbound-codec-prefs" value="opus,PCMU,PCMA,G722"/> <!-- Same for outbound leg -->
         <param name="sip-port" value="5064"/> <!-- Standard SIP port for internal calls over the WebRTC and applications -->
         <param name="dialplan" value="XML"/> <!-- Tells FreeSWITCH to load dialplans from XML files in the dialplan directory. -->
         <param name="context" value="public"/> <!-- Default context for internal calls. -->
+        <alias name="localhost"/>
         
         <!-- WebRTC WebSockets bindings -->
         <param name="ws-binding" value=":5066"/> <!-- WebSocket binding for WebRTC clients -->

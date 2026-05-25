@@ -117,11 +117,15 @@ public class FreeswitchEslService {
         if (agentId.startsWith("mock_") || "AG-FREESWITCH".equals(agentId)) {
             dialString = "loopback/agent_ans/public";
         } else {
-            dialString = "sofia/internal/sip:" + agentId + "@localhost";
+            // Must use %localhost for blind registrations because user/ requires directory xml
+            dialString = "sofia/internal/" + agentId + "%localhost";
         }
         String commandArgs = "{origination_uuid=" + agentUuid +
                 ",origination_caller_id_number=" + callerId +
                 ",origination_caller_id_name=" + callerId +
+                ",media_webrtc=true" +
+                ",rtp_secure_media=true" +
+                ",rtcp_mux=true" +
                 "}" + dialString + " &conference(" + customerUuid + "@default)";
         log.info("Originated call to agent {} with callerId {} using command: originate {}", agentId, callerId, commandArgs);
         c.sendAsyncApiCommand("originate", commandArgs);

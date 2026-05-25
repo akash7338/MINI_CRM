@@ -5,6 +5,7 @@
   all sub-configuration files (autoload_configs, dialplans, and directories).
 -->
 <document type="freeswitch/xml">
+  <X-PRE-PROCESS cmd="include" data="vars.xml"/>
   <section name="configuration" description="Various Configuration">
     <X-PRE-PROCESS cmd="include" data="autoload_configs/*.xml"/>
   </section>

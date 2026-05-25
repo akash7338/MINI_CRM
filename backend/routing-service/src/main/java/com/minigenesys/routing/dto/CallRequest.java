@@ -21,4 +21,6 @@ public class CallRequest {
     private Set<String> requiredSkills;
 
     private long priority;
+
+    private String telephonyProvider;
 }

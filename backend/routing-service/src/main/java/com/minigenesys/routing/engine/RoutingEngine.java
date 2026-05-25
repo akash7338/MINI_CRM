@@ -56,7 +56,7 @@ public class RoutingEngine {
                 .setIfAbsent(lockKey, lockToken, 10, TimeUnit.SECONDS));
         
         if (!locked) {
-            return AssignmentResult.failure(callId, tenantId, "LOCKED", "Routing in progress");
+            return AssignmentResult.failure(callId, tenantId, "LOCKED", "Routing in progress", call.getTelephonyProvider());
         }
 
         try {
@@ -68,7 +68,7 @@ public class RoutingEngine {
                 String currentStatus = statusObj != null ? statusObj.toString() : null;
                 
                 if ("BUSY".equals(currentStatus) || "AVAILABLE".equals(currentStatus)) {
-                    return AssignmentResult.success(callId, tenantId, cachedAgentId);
+                    return AssignmentResult.success(callId, tenantId, cachedAgentId, call.getTelephonyProvider());
                 } else {
                     log.warn("Idempotency hit for call {}, but agent {} is offline (status={}). Clearing idempotency cache.", callId, cachedAgentId, currentStatus);
                     redisTemplate.delete(IDEMPOTENCY_KEY_PREFIX + callId);
@@ -91,17 +91,17 @@ public class RoutingEngine {
 
             if (selectedAgentId == null) {
                 log.info("No agent available for call {} in tenant {}", callId, tenantId);
-                return AssignmentResult.failure(callId, tenantId, "NO_AGENT", "No available agent matches skills");
+                return AssignmentResult.failure(callId, tenantId, "NO_AGENT", "No available agent matches skills", call.getTelephonyProvider());
             }
 
             // 4. Persist and Cache Result
             saveAssignment(call, selectedAgentId);
 
-            return AssignmentResult.success(callId, tenantId, selectedAgentId);
+            return AssignmentResult.success(callId, tenantId, selectedAgentId, call.getTelephonyProvider());
 
         } catch (Exception e) {
             log.error("Error during routing for call {}: ", callId, e);
-            return AssignmentResult.failure(callId, tenantId, "ERROR", e.getMessage());
+            return AssignmentResult.failure(callId, tenantId, "ERROR", e.getMessage(), call.getTelephonyProvider());
         } finally {
             String script = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
             redisTemplate.execute(new DefaultRedisScript<>(script, Long.class), java.util.Collections.singletonList(lockKey), lockToken);

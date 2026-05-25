@@ -16,5 +16,6 @@
     <load module="mod_dptools"/>
     <load module="mod_commands"/>
     <load module="mod_sndfile"/>
+    <load module="mod_opus"/>
   </modules>
 </configuration>
