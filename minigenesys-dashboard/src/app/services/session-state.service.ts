@@ -228,7 +228,9 @@ export class SessionStateService implements OnDestroy {
       }
       // Update agent status on call completion
       if (payload.eventType === 'CALL_COMPLETED' && payload.agentId === currentAgentId) {
-        this.setAgentStatus('Ready');
+        if (this.agent.status !== 'Offline') {
+          this.setAgentStatus('Ready');
+        }
       }
     }
   }
