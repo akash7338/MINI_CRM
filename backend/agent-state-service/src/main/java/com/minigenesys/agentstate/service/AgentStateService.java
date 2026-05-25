@@ -201,6 +201,11 @@ public class AgentStateService {
         Agent agent = agentOpt.get();
         AgentStatus oldStatus = agent.getStatus();
 
+        if (oldStatus == AgentStatus.OFFLINE) {
+            log.info("Agent {} is already OFFLINE. Skipping call completion state change to AVAILABLE.", agent.getId());
+            return;
+        }
+
         // Update DB
         agent.setStatus(AgentStatus.AVAILABLE);
         agent.setActiveCallId(null);

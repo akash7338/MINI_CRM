@@ -99,6 +99,11 @@ public class CallService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Call must be in IN_PROGRESS, ROUTED, or QUEUED status to complete");
         }
         */
+        if (call.getStatus() == CallStatus.COMPLETED || call.getStatus() == CallStatus.FAILED || call.getStatus() == CallStatus.ABANDONED) {
+            log.info("Call {} is already in terminal status: {}. Ignoring complete request.", callId, call.getStatus());
+            return mapToResponse(call);
+        }
+
         if (call.getStatus() != CallStatus.IN_PROGRESS) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Call must be in IN_PROGRESS status to complete");
         }
@@ -231,13 +236,34 @@ public class CallService {
         }
 
         for (Call call : activeCalls) {
-            // Idempotency: skip if already requeued by a previous delivery of this event
-            if (call.getStatus() == CallStatus.QUEUED) {
-                log.info("Call {} already requeued for agent {}. Skipping duplicate.", call.getId(), event.getAgentId());
+            // Idempotency: skip if already requeued/handled by a previous delivery of this event
+            if (call.getStatus() == CallStatus.QUEUED || call.getStatus() == CallStatus.FAILED) {
+                log.info("Call {} already in status {}. Skipping duplicate handling for agent {}.", 
+                    call.getId(), call.getStatus(), event.getAgentId());
                 continue;
             }
 
-            log.info("Recovering call: {} from disconnected agent: {}. Requeuing.", 
+            if (call.getStatus() == CallStatus.IN_PROGRESS) {
+                log.info("Call {} was active/bridged (IN_PROGRESS) when agent {} disconnected. " +
+                        "Skipping retry/requeue because the real telephony leg is no longer alive. " +
+                        "Marking call as FAILED and cleaning up agent state.", call.getId(), event.getAgentId());
+
+                call.setStatus(CallStatus.FAILED);
+                call.setRoutingFailureReason("Agent disconnected during active call.");
+                callRepository.save(call);
+
+                // Publish CALL_COMPLETED to clean up the agent state
+                CallLifecycleEvent agentCleanupEvent = CallLifecycleEvent.builder()
+                        .eventType("CALL_COMPLETED")
+                        .callId(call.getId())
+                        .tenantId(call.getTenantId())
+                        .agentId(event.getAgentId())
+                        .build();
+                callEventProducer.publishLifecycleEvent(agentCleanupEvent);
+                continue;
+            }
+
+            log.info("Recovering pre-answer call: {} from disconnected agent: {}. Requeuing.", 
                 call.getId(), event.getAgentId());
 
             call.setStatus(CallStatus.QUEUED);

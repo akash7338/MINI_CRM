@@ -685,6 +685,30 @@ docker exec minigenesys-freeswitch-mvp fs_cli -x "uuid_kill <customerUuid or age
 
 ---
 
+## Active Call Retry/Requeue Logic Refinement
+*2026-05-25 — Reliability & Telephony Sync Improvement*
+
+### What retry logic was wrong
+Previously, when an agent disconnected (closed browser, WebRTC disconnected, or agent leg hung up), the `agent-state-service` published an `AGENT_DISCONNECTED` event. The `call-service` listened to this event, found any call in `ROUTED` or `IN_PROGRESS` state assigned to that agent, and automatically requeued it by resetting the call status to `QUEUED` and republishing a new `CallEvent` to Kafka.
+
+### Why requeueing Java objects is unsafe after telephony disconnect
+If a call is already active/bridged (`IN_PROGRESS`), the telephony customer leg and the agent leg are bridged. If the agent leg hangs up or disconnects, the real telephony call on FreeSWITCH or Twilio is torn down or already disconnected. Requeueing only the Java `CallRequest`/`Call` object and assigning it to another agent is incorrect and unsafe because there is no longer a live customer call leg to bridge. This leaves the next assigned agent stuck waiting for media that will never arrive.
+
+### What behavior replaced it
+1. **Case-by-Case Disconnect Handling**:
+   - **Pre-answer / Waiting Call (`ROUTED` status)**: If a call is assigned but not yet bridged, the customer leg is still waiting in queue/parking. Requeueing is valid. The call is reset to `QUEUED`, cleared of its assigned agent, and a `CALL_REQUEUED` event is published to re-route it to a different agent.
+   - **Active/Bridged Call (`IN_PROGRESS` status)**: If the call has already been answered and bridged, we skip requeueing. Instead, we mark the call status as `FAILED` (with reason `"Agent disconnected during active call."`) and publish a `CALL_COMPLETED` lifecycle event to clean up agent states.
+2. **Ignored Transitions for OFFLINE Agents**:
+   - In `AgentStateService.handleCallCompletion()`, a check was added to ensure that if an agent is already `OFFLINE` (which is their status after a disconnect detection), receiving a `CALL_COMPLETED` event will not transition them back to `AVAILABLE`. They will safely remain `OFFLINE`.
+3. **Graceful Early Return for Terminal Calls**:
+   - In `CallService.completeCall()`, if a call is already in a terminal state (`COMPLETED`, `FAILED`, `ABANDONED`), the method returns early and gracefully instead of throwing a `CONFLICT` exception. This avoids error logs when late hangup callbacks are received from FreeSWITCH/Twilio for already cleaned-up calls.
+
+### Files Changed
+- **`CallService.java`**: Implemented case separation in `handleAgentDisconnect` and early exit for terminal states in `completeCall`.
+- **`AgentStateService.java`**: Added safety check in `handleCallCompletion` to ignore completion transitions for `OFFLINE` agents.
+
+---
+
 ## Current Status
 
 | Phase | Status | Description |
@@ -695,6 +719,8 @@ docker exec minigenesys-freeswitch-mvp fs_cli -x "uuid_kill <customerUuid or age
 | Phase 3 | ✅ Done | ESL connection with background retry and event logging |
 | Phase 4 | ✅ Done | Inbound call: park → route → bridge → hangup propagation |
 | Security | ✅ Done | ACL & ESL safety hardening (default-deny policy) |
+| Retry Logic | ✅ Done | Active-call retry/requeue logic safely removed and refined |
 | Phase 5 | 🔜 Next | Mid-call controls: hold, resume, recording, disconnect REST endpoints |
 | Phase 6 | 🔜 Next | Agent outbound dialing (click-to-call from frontend) |
 | Phase 7 | 🔜 Next | Integration tests and end-to-end validation |
+
