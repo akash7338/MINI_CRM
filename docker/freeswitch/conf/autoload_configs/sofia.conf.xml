@@ -54,12 +54,20 @@ A standardized format for describing a media session.
       <settings>
         <param name="debug" value="0"/>
         <param name="sip-ip" value="0.0.0.0"/> <!-- Listen on all interfaces for SIP signaling -->
+        
+        <!-- WebRTC Signaling (WebSockets): ext-sip-ip is mostly cosmetic here because all SIP 
+             signaling is pushed through the persistent bidirectional WebSocket tunnel anyway. -->
         <param name="ext-sip-ip" value="$${external_rtp_ip}"/>  <!-- External IP for SIP, e.g. 192.168.1.4 -->
+        
         <param name="local-network-acl" value="localnet.auto"/> <!-- Allow local LAN candidates for direct ICE connection -->
         <param name="apply-candidate-acl" value="lan"/> <!-- explicitly allow browser private IP in ICE -->
         <param name="rtcp_mux" value="true"/> <!-- Underscore compatibility fallback -->
         <param name="rtp-ip" value="0.0.0.0"/> <!-- Listen for RTP on all interfaces inside container -->
+        
+        <!-- WebRTC Media (ICE): ext-rtp-ip is strictly MANDATORY. The browser's ICE engine requires a 
+             perfectly reachable candidate IP here to stream UDP audio, otherwise the call drops instantly. -->
         <param name="ext-rtp-ip" value="$${external_rtp_ip}"/> <!-- External IP for RTP, e.g. 192.168.1.4 -->
+        
         <param name="ndlb-force-ctx-ip" value="true"/> <!-- Force ext-rtp-ip even if SIP connection appears local (Docker gateway) -->
         <param name="codec-prefs" value="opus,PCMU,PCMA,G722"/> <!-- WebRTC-compatible codecs only; SPEEX removed (Chrome rejects it) -->
         <param name="inbound-codec-prefs" value="opus,PCMU,PCMA,G722"/> <!-- Same for inbound leg -->

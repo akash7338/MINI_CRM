@@ -882,7 +882,17 @@ Symmetric RTP only works if your server sends audio *first*. If FreeSWITCH answe
 
 ### 5.7 ICE, STUN & TURN: Traversing NAT for WebRTC Media
 
-ICE (Interactive Connectivity Establishment) is a WebRTC protocol that finds the best path for media to travel between two peers.
+WebRTC (the internal profile connecting FreeSWITCH to your Angular browser) uses a totally different NAT traversal mechanism than standard SIP. Instead of relying on carriers to fix things with Symmetric RTP, WebRTC uses a strict protocol called **ICE (Interactive Connectivity Establishment)** to find the best path for media to travel.
+
+#### Why `ext-rtp-ip` is Life-or-Death for WebRTC
+WebRTC is completely unforgiving. Before Google Chrome sends a single drop of audio, it demands a valid "ICE Candidate" (an IP and a Port) from FreeSWITCH. Chrome will physically test that IP by sending a STUN Binding Request (a ping). If the ping fails, Chrome immediately gives up and drops the call.
+
+If you omitted `ext-rtp-ip` from the internal profile, FreeSWITCH would put its internal Docker IP (`172.18.0.2`) into the SDP. Chrome would try to ping `172.18.0.2`, your Mac OS would drop the packet (since it can't route to the Docker bridge directly), the ICE check would fail, and the call would drop after 8 seconds of silence. This is why we set `ext-rtp-ip` to `$${external_rtp_ip}` (`192.168.1.4`)—so Chrome pings the reachable LAN IP of your Mac.
+
+#### Why `ext-sip-ip` is Cosmetic for WebRTC (WebSockets)
+While `ext-rtp-ip` controls the UDP Media, `ext-sip-ip` controls the SIP Signaling (`Contact` header). However, for WebRTC, this IP doesn't actually matter!
+
+WebRTC signaling doesn't use standard UDP packets; it uses **WebSockets (`wss://`)**. When your Angular dashboard connects to FreeSWITCH, it opens a persistent, bidirectional WebSocket tunnel. Because that tunnel is permanently held open, FreeSWITCH doesn't need to look up an IP address to send a SIP message back to the browser. It simply pushes the text frame straight down the existing WebSocket pipe. Even if the IP in the `Contact` header was completely broken, the browser's operating system never uses it to route network traffic. We still configure it to `$${external_rtp_ip}` to keep the logs clean and prevent strict parser errors, but it has no impact on routing.
 
 **Candidate Types:**
 1. **Host Candidates:** The direct local IP of each device (e.g., `192.168.1.4:51004` for the browser).
