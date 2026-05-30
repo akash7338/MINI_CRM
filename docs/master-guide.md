@@ -859,6 +859,27 @@ c=IN IP4 192.168.1.4   ← Browser can route to this!
 
 ---
 
+### 5.6b The Carrier Loophole: Symmetric Routing & Media Latching
+
+By strict textbook rules, if FreeSWITCH sends a private Docker IP (`172.18.0.2`) to a public carrier like Telnyx, the call **must fail**:
+1. **Signaling Failure:** Telnyx cannot route SIP replies (`BYE`, `ACK`) to the private IP written in the `Contact` header.
+2. **Media Failure:** Telnyx cannot route audio to the private IP written in the SDP `c=` line.
+
+However, we proved in testing that the call **still works perfectly** even when `ext-sip-ip` and `ext-rtp-ip` are omitted. Why?
+
+Because modern carriers (like Telnyx and Twilio) employ two massive safety nets on their edge SBCs (Session Border Controllers):
+
+**1. Bypassing broken `ext-sip-ip` (Symmetric Routing via `rport`)**
+Instead of trusting the IP address written inside the `Contact` header, Telnyx looks at the `Via` header. Because FreeSWITCH includes the `;rport` flag (RFC 3581), Telnyx is instructed to ignore the `Contact` text entirely. Instead, it reads the physical network envelope (the NAT-translated source IP and Port) that the packet arrived from, and sends all future SIP signaling back to that physical address.
+
+**2. Bypassing broken `ext-rtp-ip` (Symmetric RTP / Media Latching)**
+Instead of trusting the IP address written inside the SDP (`c=IN IP4 172.18.0.2`), Telnyx intentionally ignores the SDP text. It sits in silence and waits. Because the FreeSWITCH conference module immediately starts playing ringback/background noise, FreeSWITCH sends the first UDP audio packet out to the internet. When Telnyx receives that first audio packet, it looks at the physical network envelope and "latches" onto it, sending all return audio back to that physical NAT address.
+
+**Why `ext-sip-ip` and `ext-rtp-ip` are still best practice:** 
+Symmetric RTP only works if your server sends audio *first*. If FreeSWITCH answered the call silently (e.g., muted agent), Telnyx would never receive a packet to latch onto, resulting in one-way audio. Additionally, strict legacy PBXs (like Avaya or Cisco) do not use Symmetric RTP or `rport`—they will drop the call instantly if the IPs in the text payload are wrong.
+
+---
+
 ### 5.7 ICE, STUN & TURN: Traversing NAT for WebRTC Media
 
 ICE (Interactive Connectivity Establishment) is a WebRTC protocol that finds the best path for media to travel between two peers.

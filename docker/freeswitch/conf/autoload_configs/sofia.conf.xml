@@ -24,6 +24,10 @@ A standardized format for describing a media session.
       <settings>
         <param name="debug" value="0"/>
         <param name="sip-ip" value="0.0.0.0"/>  <!-- 0.0.0.0 tells FreeSWITCH to listen for SIP signaling (INVITE, ACK, etc.) on all interfaces.  -->
+        <!-- Note on ext-sip-ip and ext-rtp-ip:
+             While modern carriers like Telnyx use Symmetric RTP (Media Latching) to bypass broken SDP IPs, 
+             configuring STUN here is still mandatory best-practice to prevent one-way audio if FreeSWITCH 
+             answers a call silently without playing media first. -->
         <param name="ext-sip-ip" value="stun:stun.l.google.com:19302"/>  <!-- tells FreeSWITCH to automatically detect its external IP address via STUN -->
         <param name="rtp-ip" value="0.0.0.0"/> <!-- 0.0.0.0 tells FreeSWITCH to listen for media (RTP) traffic on all available network interfaces inside the container. -->
         <param name="ext-rtp-ip" value="stun:stun.l.google.com:19302"/> <!-- tells FreeSWITCH to automatically detect its external IP address for media traffic via STUN -->
