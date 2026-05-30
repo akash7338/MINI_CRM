@@ -899,13 +899,15 @@ While `ext-rtp-ip` controls the UDP Media, `ext-sip-ip` controls the SIP Signali
 
 WebRTC signaling doesn't use standard UDP packets; it uses **WebSockets (`wss://`)**. When your Angular dashboard connects to FreeSWITCH, it opens a persistent, bidirectional WebSocket tunnel. Because that tunnel is permanently held open, FreeSWITCH doesn't need to look up an IP address to send a SIP message back to the browser. It simply pushes the text frame straight down the existing WebSocket pipe. Even if the IP in the `Contact` header was completely broken, the browser's operating system never uses it to route network traffic. We still configure it to `$${external_rtp_ip}` to keep the logs clean and prevent strict parser errors, but it has no impact on routing.
 
-#### The WebRTC Offer/Answer Timeline (When is SDP sent?)
-WebRTC and SIP use a handshake called the **Offer/Answer Model**. The SDP is generated and sent to Angular *before* the agent ever clicks "Accept". Here is the exact timeline:
+#### The WebRTC Offer/Answer Timeline (When are the RTP ports actually opened?)
+WebRTC and SIP use a handshake called the **Offer/Answer Model**. Because of this, the RTP ports for the browser leg (the `internal` profile) open in three distinct stages:
 
-1. **The `INVITE` (The Offer):** When the Java backend commands FreeSWITCH to dial the agent, FreeSWITCH constructs a SIP `INVITE` message. It looks at `ext-rtp-ip`, writes that IP (`192.168.1.4`) into an **SDP Offer**, and pushes the `INVITE` down the WebSocket to Angular.
-2. **The Popup Appears:** Your Angular app (via `JsSIP`) receives the `INVITE` and the SDP Offer. It saves FreeSWITCH's IP into memory and triggers the UI popup to ring.
-3. **The `200 OK` (The Answer):** When you click "Accept", `JsSIP` asks Chrome for microphone access, generates its own **SDP Answer** (containing your Mac's local IP), and sends it back up the WebSocket to FreeSWITCH inside a `200 OK`.
-4. **The ICE Ping:** Immediately after exchanging SDPs, Chrome fires a UDP "ping" (STUN Binding Request) to the IP it saved from Step 1 (`192.168.1.4`). If FreeSWITCH receives the ping and replies, the audio channel opens.
+1. **Stage 1: FreeSWITCH opens its RTP port (The Offer)**
+   When the Java backend commands FreeSWITCH to dial the agent, FreeSWITCH must construct a SIP `INVITE`. Right before sending it, FreeSWITCH grabs a random UDP port (e.g. `16402`), physically opens that port inside the Docker container, and starts listening. It writes `c=IN IP4 192.168.1.4` (using `ext-rtp-ip`) and `m=audio 16402` into an **SDP Offer**, and pushes the `INVITE` down the WebSocket to Angular. *At this exact moment, FreeSWITCH is fully ready and waiting for audio, but the browser hasn't even rung yet!*
+2. **Stage 2: Chrome opens its RTP port (The Answer)**
+   Your Angular app receives the `INVITE` and the popup rings. You click "Accept". Chrome asks for microphone permission. Once granted, Chrome grabs its own random UDP port on your Mac (e.g. `51004`) and begins listening. Chrome writes its IP and port into an **SDP Answer** and sends it back to FreeSWITCH inside a `200 OK`.
+3. **Stage 3: The ICE Ping (The Connection Opens)**
+   Now both sides have opened their ports, but WebRTC requires one final step. Chrome looks at the IP FreeSWITCH sent in Step 1 (`192.168.1.4:16402`) and fires a UDP "ping" (an ICE STUN Request). FreeSWITCH receives the ping on port `16402` and replies. Because the ping succeeded, the encrypted audio channel instantly unlocks, and two-way RTP audio starts streaming!
 
 **Candidate Types:**
 1. **Host Candidates:** The direct local IP of each device (e.g., `192.168.1.4:51004` for the browser).
