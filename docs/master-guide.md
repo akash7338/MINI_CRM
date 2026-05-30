@@ -1261,18 +1261,94 @@ docker exec -it minigenesys-freeswitch-mvp fs_cli
 # List all SIP profiles and their status
 docker exec minigenesys-freeswitch-mvp fs_cli -x "sofia status"
 
+# Show detailed status of a specific profile (includes IP bindings)
+docker exec minigenesys-freeswitch-mvp fs_cli -x "sofia status profile external"
+docker exec minigenesys-freeswitch-mvp fs_cli -x "sofia status profile internal"
+
 # Show currently registered WebRTC/SIP clients (browsers)
 docker exec minigenesys-freeswitch-mvp fs_cli -x "sofia status profile internal reg"
 
 # Restart a single profile without restarting the container
 docker exec minigenesys-freeswitch-mvp fs_cli -x "sofia profile internal restart"
-
-# Enable SIP message tracing (shows full INVITE/SDP/200 OK payloads)
-docker exec minigenesys-freeswitch-mvp fs_cli -x "sofia profile internal siptrace on"
-docker exec minigenesys-freeswitch-mvp fs_cli -x "console loglevel debug"
+docker exec minigenesys-freeswitch-mvp fs_cli -x "sofia profile external restart"
 ```
 
 For Telnyx gateway registration: look for `REGED` status. If you see `NOREG` or `FAIL_WAIT`, credentials or network routing are wrong. Use `docker restart` (not `reloadxml`) to re-send a fresh `REGISTER` to the carrier.
+
+---
+
+### 9.4b SIP/SDP Deep Inspection (Packet-Level Debugging)
+
+These are the most powerful debugging commands for diagnosing NAT, audio, and signaling issues. They show the raw SIP messages (INVITE, 200 OK, BYE) including the full SDP payload with the `c=` line and codec negotiation.
+
+```bash
+# ── Turn on SIP Tracing (Raw Packet Capture) ──
+
+# Enable SIP trace globally (all profiles at once — external + internal)
+docker exec minigenesys-freeswitch-mvp fs_cli -x "sofia global siptrace on"
+
+# Enable SIP trace for a specific profile only
+docker exec minigenesys-freeswitch-mvp fs_cli -x "sofia profile external siptrace on"
+docker exec minigenesys-freeswitch-mvp fs_cli -x "sofia profile internal siptrace on"
+
+# Turn off SIP trace when done (reduces log noise)
+docker exec minigenesys-freeswitch-mvp fs_cli -x "sofia global siptrace off"
+```
+
+Once siptrace is enabled, make a test call, then dump the logs and inspect:
+
+```bash
+# Dump recent logs to a file for analysis
+docker logs --tail 500 minigenesys-freeswitch-mvp > /tmp/fs_sip_trace.log
+
+# ── Find the SDP Connection IP (the most critical line for NAT debugging) ──
+# This shows what IP FreeSWITCH is advertising to Telnyx/Chrome
+grep "c=IN IP4" /tmp/fs_sip_trace.log
+
+# ── Find SIP messages sent TO Telnyx (outbound to carrier) ──
+grep "send.*bytes to tcp" /tmp/fs_sip_trace.log
+
+# ── Find SIP messages sent TO the Browser (outbound to WebRTC) ──
+grep "send.*bytes to wss" /tmp/fs_sip_trace.log
+
+# ── Extract the full 200 OK + SDP sent to Telnyx ──
+# (Shows the exact SDP Answer FreeSWITCH gave to the carrier)
+grep -A 40 "send.*bytes to tcp.*5060" /tmp/fs_sip_trace.log
+
+# ── Extract the full INVITE + SDP sent to the Browser ──
+# (Shows the exact SDP Offer FreeSWITCH gave to Chrome via WebSocket)
+grep -A 40 "send.*bytes to wss" /tmp/fs_sip_trace.log
+```
+
+**What to look for in the SDP:**
+- `c=IN IP4 172.18.0.2` → **Broken!** FreeSWITCH is advertising the Docker IP. `ext-rtp-ip` is not configured.
+- `c=IN IP4 192.168.1.4` → **Correct for LAN/WebRTC.** Browser can reach this.
+- `c=IN IP4 203.0.113.5` → **Correct for Telnyx.** Public IP resolved via STUN.
+- `m=audio 16400 RTP/AVP 0` → The UDP port FreeSWITCH opened for this call's audio.
+
+---
+
+### 9.4c NAT & IP Verification Commands
+
+```bash
+# ── Check what IPs a profile is actually advertising ──
+# Look for Ext-RTP-IP, Ext-SIP-IP, RTP-IP, SIP-IP in the output
+docker exec minigenesys-freeswitch-mvp fs_cli -x "sofia status profile external" | grep -E "RTP-IP|SIP-IP"
+docker exec minigenesys-freeswitch-mvp fs_cli -x "sofia status profile internal" | grep -E "RTP-IP|SIP-IP"
+
+# ── Verify global variables (vars.xml values) ──
+docker exec minigenesys-freeswitch-mvp fs_cli -x "global_getvar external_rtp_ip"
+
+# ── Check what public IP STUN resolved to ──
+# (If ext-rtp-ip uses stun:, this shows the cached result)
+docker exec minigenesys-freeswitch-mvp fs_cli -x "sofia status profile external" | grep "Ext-RTP-IP"
+
+# ── Verify Docker port mappings from host ──
+docker port minigenesys-freeswitch-mvp
+
+# ── Test if RTP UDP ports are open and reachable from host ──
+nc -zuv localhost 16384
+```
 
 ---
 
@@ -1295,6 +1371,12 @@ If registration fails due to self-signed TLS certificate rejection in the browse
 ```bash
 # List all active audio channels with IPs, codecs, and ports
 docker exec minigenesys-freeswitch-mvp fs_cli -x "show channels"
+
+# Show detailed call info for a specific UUID (includes codec, RTP IP, and port)
+docker exec minigenesys-freeswitch-mvp fs_cli -x "uuid_dump <uuid>"
+
+# Show only the media-related variables for a call
+docker exec minigenesys-freeswitch-mvp fs_cli -x "uuid_dump <uuid>" | grep -iE "rtp|codec|sdp|media|ice"
 ```
 
 If you see channels but hear no audio, check that:
@@ -1331,6 +1413,9 @@ docker exec minigenesys-freeswitch-mvp fs_cli -x "originate loopback/1234/public
 
 # Kill a specific call leg by UUID
 docker exec minigenesys-freeswitch-mvp fs_cli -x "uuid_kill <uuid>"
+
+# Kill ALL active calls (nuclear option for stuck sessions)
+docker exec minigenesys-freeswitch-mvp fs_cli -x "hupall"
 
 # Reset stuck agent state in Postgres
 docker exec <postgres_container> psql -U postgres -d minigenesys_call_service \
