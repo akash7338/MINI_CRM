@@ -878,6 +878,11 @@ Instead of trusting the IP address written inside the SDP (`c=IN IP4 172.18.0.2`
 **Why `ext-sip-ip` and `ext-rtp-ip` are still best practice:** 
 Symmetric RTP only works if your server sends audio *first*. If FreeSWITCH answered the call silently (e.g., muted agent), Telnyx would never receive a packet to latch onto, resulting in one-way audio. Additionally, strict legacy PBXs (like Avaya or Cisco) do not use Symmetric RTP or `rport`—they will drop the call instantly if the IPs in the text payload are wrong.
 
+**If Telnyx ignores the IP, why send the SDP at all?**
+Even though the media server (RTP) ignores the IP address, the signaling server (SIP) strictly requires the SDP for two reasons:
+1. **Codec Negotiation:** The SDP contains the list of supported audio languages (e.g., PCMU, Opus). If omitted, Telnyx wouldn't know how to encode the audio, leading to robotic noise or failure.
+2. **Protocol Compliance:** RFC 3261 rigidly requires an SDP Answer to an SDP Offer. If FreeSWITCH replied with a `200 OK` lacking an SDP body, Telnyx's SIP stack would immediately drop the call with an error before the audio even had a chance to start.
+
 ---
 
 ### 5.7 ICE, STUN & TURN: Traversing NAT for WebRTC Media
@@ -893,6 +898,14 @@ If you omitted `ext-rtp-ip` from the internal profile, FreeSWITCH would put its 
 While `ext-rtp-ip` controls the UDP Media, `ext-sip-ip` controls the SIP Signaling (`Contact` header). However, for WebRTC, this IP doesn't actually matter!
 
 WebRTC signaling doesn't use standard UDP packets; it uses **WebSockets (`wss://`)**. When your Angular dashboard connects to FreeSWITCH, it opens a persistent, bidirectional WebSocket tunnel. Because that tunnel is permanently held open, FreeSWITCH doesn't need to look up an IP address to send a SIP message back to the browser. It simply pushes the text frame straight down the existing WebSocket pipe. Even if the IP in the `Contact` header was completely broken, the browser's operating system never uses it to route network traffic. We still configure it to `$${external_rtp_ip}` to keep the logs clean and prevent strict parser errors, but it has no impact on routing.
+
+#### The WebRTC Offer/Answer Timeline (When is SDP sent?)
+WebRTC and SIP use a handshake called the **Offer/Answer Model**. The SDP is generated and sent to Angular *before* the agent ever clicks "Accept". Here is the exact timeline:
+
+1. **The `INVITE` (The Offer):** When the Java backend commands FreeSWITCH to dial the agent, FreeSWITCH constructs a SIP `INVITE` message. It looks at `ext-rtp-ip`, writes that IP (`192.168.1.4`) into an **SDP Offer**, and pushes the `INVITE` down the WebSocket to Angular.
+2. **The Popup Appears:** Your Angular app (via `JsSIP`) receives the `INVITE` and the SDP Offer. It saves FreeSWITCH's IP into memory and triggers the UI popup to ring.
+3. **The `200 OK` (The Answer):** When you click "Accept", `JsSIP` asks Chrome for microphone access, generates its own **SDP Answer** (containing your Mac's local IP), and sends it back up the WebSocket to FreeSWITCH inside a `200 OK`.
+4. **The ICE Ping:** Immediately after exchanging SDPs, Chrome fires a UDP "ping" (STUN Binding Request) to the IP it saved from Step 1 (`192.168.1.4`). If FreeSWITCH receives the ping and replies, the audio channel opens.
 
 **Candidate Types:**
 1. **Host Candidates:** The direct local IP of each device (e.g., `192.168.1.4:51004` for the browser).
