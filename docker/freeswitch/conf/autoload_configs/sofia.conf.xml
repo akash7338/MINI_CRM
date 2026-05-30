@@ -2,6 +2,18 @@
   Purpose: Sofia SIP engine configuration.
   Configures the SIP profiles (external for trunk gateways, internal for WebRTC/WS/WSS clients).
   Defines SIP binding ports, registration requirements, codecs, and TLS settings.
+  High-level purpose
+
+SDP answers questions like:
+- Which IP address should I send audio to?
+- Which port should I use?
+- Which codecs do you support?
+- Audio or video?
+- RTP or SRTP?
+
+So SDP is basically:
+
+A standardized format for describing a media session.
 -->
 <configuration name="sofia.conf" description="sofia Endpoint">
   <global_settings>
@@ -41,7 +53,6 @@
         <param name="ext-sip-ip" value="$${external_rtp_ip}"/>  <!-- External IP for SIP, e.g. 192.168.1.4 -->
         <param name="local-network-acl" value="localnet.auto"/> <!-- Allow local LAN candidates for direct ICE connection -->
         <param name="apply-candidate-acl" value="lan"/> <!-- explicitly allow browser private IP in ICE -->
-        <param name="rtcp-mux" value="true"/> <!-- Force RTCP Multiplexing for WebRTC clients -->
         <param name="rtcp_mux" value="true"/> <!-- Underscore compatibility fallback -->
         <param name="rtp-ip" value="0.0.0.0"/> <!-- Listen for RTP on all interfaces inside container -->
         <param name="ext-rtp-ip" value="$${external_rtp_ip}"/> <!-- External IP for RTP, e.g. 192.168.1.4 -->

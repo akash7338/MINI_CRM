@@ -5,23 +5,25 @@
 -->
 <configuration name="event_socket.conf" description="Socket Client">
   <settings>
-<!--
-  0.0.0.0 means FreeSWITCH will bind ESL to every IP/interface available
-  inside the container, including the Docker network IP.
-
-  This is needed because Docker port mapping forwards host traffic
-  to the container's Docker network IP, not only to container localhost.
-  Docker:
-  “If traffic comes to host machine port 8022,forward it to container port 8021.”
-  So Docker creates a NETWORK ROUTE.
-  But Docker itself does NOT know whether anything is actually listening on 8021.
-  It only forwards traffic.
--->
-<param name="listen-ip" value="0.0.0.0"/>
+    <!-- Binds Event Socket to all network interfaces (0.0.0.0) so other containers and host port-forwarding can connect -->
+    <!-- In networking terms:
+         listen-ip tells the Event Socket module (mod_event_socket) which network interface it should bind to and listen for incoming TCP connection requests.
+         0.0.0.0 is a wildcard IP address that tells FreeSWITCH to listen on all available network interfaces inside the container.
+         Why 0.0.0.0 is required here (instead of 127.0.0.1):
+         Inside the Docker container, FreeSWITCH has two main interfaces:
+         Loopback (127.0.0.1): Only accessible within the container itself.
+         Docker Bridge Network Interface (e.g., 172.18.0.2): Accessible to other containers and to the host machine (via port forwarding).
+         If you set listen-ip to 127.0.0.1, FreeSWITCH would only bind to loopback. This would prevent the Spring Boot freeswitch-service (running on your host Mac or another container) from connecting to ESL.
+         By binding to 0.0.0.0, FreeSWITCH listens on both interfaces, allowing the host machine (via Docker port mapping on host port 8022 ➜ container port 8021) to connect successfully.
+      -->
+    <param name="listen-ip" value="0.0.0.0"/>
+    <!-- TCP port the Event Socket listens on inside the container (mapped to 8022 on host OS) -->
     <param name="listen-port" value="8021"/>
+    <!-- Password required for Event Socket authentication -->
     <param name="password" value="ClueCon"/>
-    <!-- apply-inbound-acl references a named list from acl.conf.xml -->
+    <!-- References the access control list (ACL) to restrict allowed inbound connection IPs -->
     <param name="apply-inbound-acl" value="0.0.0.0/0"/>
-    <param name="stop-on-bind-error" value="false"/> <!-- It prevents FreeSWITCH from shutting down if ESL fails to bind (e.g. port already in use). -->
+    <!-- Prevents FreeSWITCH engine from shutting down if Event Socket fails to bind (e.g., port in use) -->
+    <param name="stop-on-bind-error" value="false"/>
   </settings>
 </configuration>
