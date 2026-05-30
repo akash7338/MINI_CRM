@@ -1378,6 +1378,16 @@ Without a `loops=1` parameter, `tone_stream` plays indefinitely. The dialplan ex
 
 ---
 
+### 10.7 WebSocket Connection Fails After Session Expiry (Infinite Retry Loop)
+
+**Symptom:** After an agent session expires (or they log out and log back in), the dashboard fails to receive WebSocket events. The backend gateway logs repeatedly show `Invalid or expired token`.
+
+**Root cause:** The frontend Angular `WebsocketService` initialized the `stompjs` client with a static `connectHeaders` object on page load. When the STOMP client automatically tried to reconnect after being disconnected, it reused this stale, cached token from the initial load, rather than fetching the fresh token that was put into `localStorage` after the re-login.
+
+**Fix:** Added a `beforeConnect` hook to the STOMP client configuration to dynamically fetch the latest JWT from `localStorage` right before every single reconnection attempt.
+
+---
+
 # Chapter 11: MVP Integration Changelog
 
 ### 11.1 Phase 0: Architecture Decision

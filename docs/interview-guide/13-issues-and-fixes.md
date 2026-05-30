@@ -200,3 +200,13 @@ A 16-issue Copilot audit was run against the codebase. Of the 16 issues, 5 were 
 - Blocking Kafka `.get()` inside `@Transactional`: intentional design for publish-before-commit consistency. Risk only at scale under broker failure.
 - `detectDisconnects()` no distributed lock: single-instance deployment; ShedLock would require a new dependency.
 - DLQ topic naming: `{topic}.DLQ` convention is valid; auto-create enabled locally.
+
+---
+
+## 16. WebSocket JWT Token Caching on Auto-Reconnect
+
+- **Problem:** After a frontend session expired (or a user logged out and logged back in), the WebSocket connection continuously failed with an `Invalid or expired token` error in the `api-gateway` and `websocket-gateway` logs, despite the browser having a fresh, valid token.
+- **Root Cause:** The Angular `WebsocketService` configured the `@stomp/stompjs` client with a hardcoded `connectHeaders` object at the exact moment `connect()` was first called. Because `stompjs` has an auto-reconnect feature (`reconnectDelay: 5000`), it automatically attempted to reconnect in the background using that exact same cached configuration—completely ignoring the new token that was placed in `localStorage` after the fresh login.
+- **Impact:** The WebSocket connection was permanently broken after a token expiration, preventing real-time dashboard updates until a hard browser refresh completely destroyed and recreated the Angular service.
+- **Fix:** Added a `beforeConnect` hook to the `stompClient` configuration. This hook executes dynamically right before every single reconnection attempt, freshly fetching the token from `localStorage` and mutating the `connectHeaders`.
+- **Key Learning:** Configuration objects for auto-reconnecting clients must be evaluated lazily or dynamically at connection time, not statically at instantiation time.
