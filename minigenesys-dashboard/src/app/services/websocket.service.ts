@@ -22,6 +22,14 @@ export class WebsocketService {
       webSocketFactory: () => new SockJS('http://localhost:8080/ws'),
       debug: (msg: string) => console.log('[STOMP DEBUG]', msg),
       reconnectDelay: 5000,
+      beforeConnect: () => {
+        const token = localStorage.getItem('token');
+        if (token) {
+          this.stompClient.connectHeaders = {
+            'Authorization': `Bearer ${token}`
+          };
+        }
+      }
     });
 
     this.stompClient.onConnect = (frame) => {
