@@ -386,7 +386,7 @@ Think of FreeSWITCH as a middleman sitting between your **Agents (Browser)** and
 | Port | Profile | Target Audience | Protocol | What it does |
 | :--- | :--- | :--- | :--- | :--- |
 | **`7443`** | `internal` | Agent Browser | SIP over WSS (WebSockets) | Agents connect here to log in (register). FreeSWITCH uses this persistent WebSocket to push inbound calls to the browser. |
-| **`5060` (mapped to `5062`)** | `external` | Telnyx / PSTN | Raw SIP over UDP/TCP | FreeSWITCH reaches out here to register with Telnyx. Telnyx sends inbound customer SIP `INVITE` packets here. |
+| **`5060` (mapped to `5062`)** | `external` | Telnyx / PSTN | Raw SIP over **TCP** (Telnyx uses TCP because the gateway registers with `register-transport=tcp`) | FreeSWITCH reaches out here to register with Telnyx. Telnyx sends inbound customer SIP `INVITE` packets here. |
 
 #### Visual Flow
 * **External Profile (port 5062 → 5060):**
@@ -958,10 +958,12 @@ WebRTC and SIP use a handshake called the **Offer/Answer Model**. Because of thi
 
 A customer dials your support number. Telnyx (configured with your public IP) sends a SIP `INVITE` to `203.0.113.5:5062`.
 
+> **Transport note:** Telnyx uses **TCP** for SIP signaling, not UDP. This is because the FreeSWITCH external profile registers with Telnyx using `register-transport=tcp` in the gateway config. Telnyx follows the transport of the registration for all subsequent signaling (INVITEs, BYEs, ACKs). The `5062:5060/tcp` Docker mapping handles this. The `/udp` mapping exists but is not used by Telnyx in practice.
+
 **The packet journey:**
 ```
 Telnyx Server (148.64.x.x:5060)
-    | UDP Packet: INVITE sip:+91XXXXXXXXXX@203.0.113.5:5062
+    | TCP Packet: INVITE sip:+91XXXXXXXXXX@203.0.113.5:5062
     ↓
 Your Router (203.0.113.5)
     | Port Forwarding Rule: 5062 → 192.168.1.4:5062
@@ -1020,17 +1022,21 @@ The `Unique-ID` is the FreeSWITCH **channel UUID** — used as the primary key f
 ### 6.5 Step 4 & 5: Routing via Kafka (call-service → routing-service → Kafka)
 
 Asynchronously, outside `freeswitch-service`:
-- `call-service` → Kafka topic `routing-requests`
-- `routing-service` finds an available agent in Redis
-- `routing-service` → Kafka topic `routing-events`:
+- `call-service` → Kafka topic `call-events` (publishes a `CallEvent` DTO)
+- `routing-service` consumes `call-events` as a `CallRequest`, finds an available agent in Redis using LRU scoring
+- `routing-service` → Kafka topic `routing-events` (publishes an `AssignmentResult` matching the `RoutingEvent` schema):
   ```json
   {
     "callId": "call-789",
+    "tenantId": "tenant-freeswitch",
     "agentId": "akash-freeswitch",
     "status": "ASSIGNED",
+    "success": true,
     "telephonyProvider": "FREESWITCH"
   }
   ```
+
+> **Note:** There is no `routing-requests` topic. The topic is `call-events`. `telephonyProvider` is passed through from `CallRequest` (hardcoded `"FREESWITCH"` by `CallServiceClient.createInternalCall()`) all the way into `AssignmentResult` via `RoutingEngine.assignAgent()`.
 
 ---
 
@@ -1067,7 +1073,12 @@ FreeSWITCH creates conference room `abc-123-uuid@default` and places the custome
 
 **Command 2: Dial the agent into the same room:**
 ```text
-ESL: originate {origination_uuid=def-456-uuid,media_webrtc=true,rtp_secure_media=true}
+ESL: originate {origination_uuid=def-456-uuid,
+                origination_caller_id_number=+919876543210,
+                origination_caller_id_name=+919876543210,
+                media_webrtc=true,
+                rtp_secure_media=true,
+                rtcp_mux=true}
        sofia/internal/akash-freeswitch%localhost
        &conference(abc-123-uuid@default)
 ```
@@ -1128,14 +1139,33 @@ The conference room empties and FreeSWITCH destroys it automatically.
 
 ### 7.1 `sofia.conf.xml` Key Parameters Explained
 
+The external and internal profiles have **different** `ext-sip-ip` / `ext-rtp-ip` strategies:
+
+**External profile (Telnyx / carrier):**
+```xml
+<param name="ext-sip-ip" value="stun:stun.l.google.com:19302"/>  <!-- STUN discovers public WAN IP -->
+<param name="ext-rtp-ip" value="stun:stun.l.google.com:19302"/>  <!-- STUN discovers public WAN IP -->
+```
+STUN auto-discovers the public WAN IP at startup. If STUN fails (no internet from container), FreeSWITCH falls back to the container IP `172.18.0.2` — see Bug 10.3b.
+
+**Internal profile (browser / WebRTC):**
+```xml
+<param name="ext-sip-ip" value="$${external_rtp_ip}"/>  <!-- Hardcoded LAN IP from vars.xml -->
+<param name="ext-rtp-ip" value="$${external_rtp_ip}"/>  <!-- Hardcoded LAN IP from vars.xml -->
+<param name="ndlb-force-ctx-ip"   value="true"/>         <!-- Force ext-rtp-ip even via Docker bridge -->
+<param name="apply-candidate-acl" value="lan"/>          <!-- Accept private-IP ICE candidates -->
+```
+
 | Parameter | Value | What it does |
 | :--- | :--- | :--- |
 | `sip-ip` | `0.0.0.0` | Bind SIP socket to all container interfaces |
-| `ext-sip-ip` | `$${FREESWITCH_EXT_IP}` | Advertise this IP in SIP Contact headers |
+| `ext-sip-ip` | STUN (external) / `$${external_rtp_ip}` (internal) | Advertise this IP in SIP Contact headers |
 | `rtp-ip` | `0.0.0.0` | Bind RTP audio socket to all container interfaces |
-| `ext-rtp-ip` | `$${FREESWITCH_EXT_IP}` | Write this IP in SDP `c=` line for media |
-| `sip-port` | `5060` | Internal SIP signaling port |
-| `context` | `public` / `default` | Which dialplan to route calls to |
+| `ext-rtp-ip` | STUN (external) / `$${external_rtp_ip}` (internal) | Write this IP in SDP `c=` line for media |
+| `sip-port` | `5060` (external) / `5064` (internal, not published in docker-compose) | Internal SIP signaling port |
+| `ws-binding` | `:5066` | Plain WebSocket for local testing |
+| `wss-binding` | `:7443` | Secure WebSocket for browser WebRTC |
+| `context` | `public` | Which dialplan to route calls to |
 | `accept-blind-reg` | `true` | Accept browser registrations without directory entry |
 | `auth-calls` | `false` | Don't require password for browser SIP calls |
 | `ndlb-force-ctx-ip` | `true` | Force `ext-rtp-ip` even when Docker masks connections |
@@ -1148,14 +1178,16 @@ The conference room empties and FreeSWITCH destroys it automatically.
 ```xml
 <configuration name="event_socket.conf">
   <settings>
-    <param name="nat-map"         value="false"/>
-    <param name="listen-ip"       value="0.0.0.0"/>  <!-- Listen on all container interfaces -->
-    <param name="listen-port"     value="8021"/>       <!-- Internal port (host maps 8022 → 8021) -->
-    <param name="password"        value="ClueCon"/>    <!-- Java auth password -->
-    <param name="apply-inbound-acl" value="lan"/>      <!-- Named ACL (not raw CIDR) -->
+    <param name="listen-ip"         value="0.0.0.0"/>  <!-- Listen on all container interfaces -->
+    <param name="listen-port"       value="8021"/>       <!-- Internal port (host maps 8022 → 8021) -->
+    <param name="password"          value="ClueCon"/>    <!-- Java auth password -->
+    <param name="apply-inbound-acl" value="0.0.0.0/0"/> <!-- Local dev: allows all. Restrict in production. -->
+    <param name="stop-on-bind-error" value="false"/>
   </settings>
 </configuration>
 ```
+
+> **Note:** The actual `event_socket.conf.xml` uses `apply-inbound-acl = "0.0.0.0/0"` (raw CIDR, intentionally permissive for local development). This is valid syntax and allows all IPs to connect. In production, replace with the named ACL `"lan"` to restrict access to private subnets only.
 
 ---
 
@@ -1177,10 +1209,9 @@ These ports must exactly match the Docker Compose UDP port range mapping:
 
 ```xml
 <X-PRE-PROCESS cmd="set" data="external_rtp_ip=192.168.1.4"/>
-<X-PRE-PROCESS cmd="set" data="external_sip_ip=192.168.1.4"/>
 ```
 
-These values are injected via the `FREESWITCH_EXT_IP` environment variable in Docker Compose.
+> **Note:** Only `external_rtp_ip` is defined here. There is no `external_sip_ip` variable. The internal profile's `ext-sip-ip` references `$${external_rtp_ip}` directly. The external profile uses STUN, not this variable.
 
 ---
 
@@ -1200,13 +1231,14 @@ ACLs (Access Control Lists) act as IP-level firewall rules inside FreeSWITCH. Th
 </list>
 ```
 
-`default="deny"` means: reject any IP not explicitly listed. The three CIDR ranges cover:
-- Your Mac's LAN IP (`192.168.1.4`)
-- Docker's bridge IP (`172.18.0.1`)
+`default="deny"` means: reject any IP not explicitly listed. The three CIDR ranges cover your Mac's LAN IP, Docker bridge, and any container-to-container traffic.
+
+> **Telnyx and the ACL:** The external Sofia profile has **no `apply-inbound-acl` parameter**, so Telnyx INVITEs are not ACL-filtered at the Sofia level. Authentication for the Telnyx trunk is handled by the gateway registration block (`register=true` with credentials in `sofia.conf.xml`). There is no need to add a Telnyx `/32` entry to `acl.conf.xml`.'s bridge IP (`172.18.0.1`)
 - Any container-to-container traffic
 
 ### 8.3 `event_socket.conf.xml` Security Hardening
-- `apply-inbound-acl` must reference a **named ACL** (`"lan"`), not a raw CIDR string (`"0.0.0.0/0"`). Raw CIDR notation is syntactically invalid for this parameter and will leave the ESL socket completely open.
+- In local development, `apply-inbound-acl` is set to `"0.0.0.0/0"` (raw CIDR) — this is valid syntax and intentionally permissive.
+- In production, change this to the named ACL `"lan"` to restrict ESL access to private subnets only.
 
 ---
 
@@ -1576,7 +1608,7 @@ PARKED → DIALING_AGENT → BRIDGED → COMPLETED
 
 ### 11.6 Security Hardening
 - `acl.conf.xml`: Changed `default="deny"` with explicit private subnet allow rules.
-- `event_socket.conf.xml`: Changed `apply-inbound-acl` from raw CIDR to named ACL `"lan"`.
+- `event_socket.conf.xml`: `apply-inbound-acl` uses `"0.0.0.0/0"` (raw CIDR, intentionally permissive for local dev). Named ACL `"lan"` is used by Sofia profiles instead.
 
 ---
 
