@@ -38,6 +38,9 @@ import { FreeswitchWebRtcService } from '../../services/freeswitch-webrtc.servic
         <span class="active-number">{{ activeCall ? activeCall.parameters['From'] : (activeSession?.remote_identity?.uri?.user || 'FreeSWITCH') }}</span>
         <span class="timer">{{ duration }}s</span>
       </div>
+      <button (click)="onToggleMute()" class="btn-mute" [class.muted]="isMuted">
+        {{ isMuted ? 'Unmute' : 'Mute' }}
+      </button>
       <button (click)="onHangup()" class="btn-hangup">Hang Up</button>
     </div>
   `,
@@ -211,6 +214,22 @@ import { FreeswitchWebRtcService } from '../../services/freeswitch-webrtc.servic
     }
 
     .btn-hangup:hover { background: #e84118; }
+
+    .btn-mute {
+      background: #747d8c;
+      color: white;
+      border: none;
+      padding: 6px 16px;
+      border-radius: 50px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      margin-right: 8px;
+    }
+
+    .btn-mute:hover { background: #57606f; }
+    .btn-mute.muted { background: #ffa502; color: #000; }
+    .btn-mute.muted:hover { background: #eccc68; }
   `]
 })
 export class TelephonyOverlayComponent implements OnInit {
@@ -220,6 +239,7 @@ export class TelephonyOverlayComponent implements OnInit {
   activeSession: any | null = null;
   duration = 0;
   timer: any;
+  isMuted = false;
 
   constructor(
     private telephonyService: TelephonyService,
@@ -272,6 +292,7 @@ export class TelephonyOverlayComponent implements OnInit {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
+      this.isMuted = false;
     }
   }
 
@@ -310,6 +331,19 @@ export class TelephonyOverlayComponent implements OnInit {
           }
         }
       });
+    }
+  }
+
+  onToggleMute() {
+    this.isMuted = !this.isMuted;
+    if (this.activeCall) {
+      this.activeCall.mute(this.isMuted);
+    } else if (this.activeSession) {
+      if (this.isMuted) {
+        this.activeSession.mute({ audio: true, video: false });
+      } else {
+        this.activeSession.unmute({ audio: true, video: false });
+      }
     }
   }
 
