@@ -53,17 +53,13 @@ export class SessionStateService implements OnDestroy {
       this.addToHistory(event);
     });
 
-    // Sync agent ID from storage if available
     const storedAgentId = localStorage.getItem('agentId');
     if (storedAgentId) {
       this.patchAgent({ agentId: storedAgentId });
-      this.loadInitialState(storedAgentId);
-      // Ensure we are subscribed to the correct tenant events
-      this.ws.subscribeToTenantEvents();
     }
   }
 
-  private loadInitialState(agentId: string) {
+  loadInitialState(agentId: string) {
     console.log('[SessionState] Loading initial state for:', agentId);
     this.api.getAgentState(agentId).subscribe({
       next: (res: any) => {

@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 @Component
 @ConditionalOnProperty(name = "jwt.secret")
@@ -61,9 +62,19 @@ public class JwtUtil {
         return Jwts.builder()
                 .setClaims(claims)
                 .setSubject(userId)
+                .setId(UUID.randomUUID().toString())   // jti — unique per issuance
                 .setIssuedAt(new Date())
                 .setExpiration(new Date((new Date()).getTime() + expirationMs))
                 .signWith(key)
                 .compact();
+    }
+
+    /**
+     * Builds the Redis blacklist key using the JWT's unique jti claim.
+     * jti is a UUID generated per-token, so two tokens issued within the same
+     * second for the same user will always have different blacklist keys.
+     */
+    public static String blacklistKey(String jti) {
+        return "blacklist:" + jti;
     }
 }

@@ -35,5 +35,7 @@ services:
   callServiceUrl: ${CALL_SERVICE_URL:http://localhost:8087}
 
 logging:
+  file:
+    name: ${LOG_FILE:logs/telephony-service.log}
   level:
     com.minigenesys.telephony: DEBUG

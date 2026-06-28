@@ -33,14 +33,14 @@ public class AuthChannelInterceptor implements ChannelInterceptor {
                 try {
                     Claims claims = jwtUtil.getAllClaimsFromToken(token);
                     String tenantId = claims.get("tenantId", String.class);
-                    String userId = claims.getSubject();
+                    String userId   = claims.getSubject();
 
                     UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
                             userId, null, Collections.emptyList());
-                    
-                    // Store tenantId in session attributes
+
                     if (accessor.getSessionAttributes() != null) {
                         accessor.getSessionAttributes().put("tenantId", tenantId);
+                        accessor.getSessionAttributes().put("userId",   userId);
                     }
                     accessor.setUser(auth);
                     log.info("WebSocket connected for user {} in tenant {}", userId, tenantId);
@@ -56,14 +56,34 @@ public class AuthChannelInterceptor implements ChannelInterceptor {
 
         if (StompCommand.SUBSCRIBE.equals(accessor.getCommand())) {
             String destination = accessor.getDestination();
-            String tenantId = accessor.getSessionAttributes() != null ? 
-                    (String) accessor.getSessionAttributes().get("tenantId") : null;
+            if (destination == null) return message;
 
-            if (destination != null && destination.startsWith("/topic/events/")) {
+            String sessionTenantId = accessor.getSessionAttributes() != null ?
+                    (String) accessor.getSessionAttributes().get("tenantId") : null;
+            String sessionUserId = accessor.getSessionAttributes() != null ?
+                    (String) accessor.getSessionAttributes().get("userId") : null;
+
+            // /topic/events/{tenantId} — shared tenant broadcast
+            if (destination.startsWith("/topic/events/")) {
                 String requestedTenantId = destination.substring("/topic/events/".length());
-                if (tenantId == null || !requestedTenantId.equals(tenantId)) {
-                    log.warn("User tried to subscribe to wrong tenant: {} vs {}", requestedTenantId, tenantId);
+                if (sessionTenantId == null || !requestedTenantId.equals(sessionTenantId)) {
+                    log.warn("SUBSCRIBE forbidden: user tried to subscribe to wrong tenant topic: {}", destination);
                     throw new IllegalArgumentException("Forbidden");
+                }
+            }
+
+            // /topic/{tenantId}/user/{userId} — personal logout notification channel
+            // Users may only subscribe to their own user channel.
+            if (destination.matches("/topic/[^/]+/user/[^/]+")) {
+                String[] parts = destination.split("/");
+                // parts = ["", "topic", tenantId, "user", userId]
+                if (parts.length == 5) {
+                    String destTenantId = parts[2];
+                    String destUserId   = parts[4];
+                    if (!destTenantId.equals(sessionTenantId) || !destUserId.equals(sessionUserId)) {
+                        log.warn("SUBSCRIBE forbidden: {} tried to subscribe to user channel {}", sessionUserId, destination);
+                        throw new IllegalArgumentException("Forbidden");
+                    }
                 }
             }
         }

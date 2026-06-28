@@ -36,6 +36,8 @@ server:
   port: 8086
 
 logging:
+  file:
+    name: ${LOG_FILE:logs/agent-state-service.log}
   level:
     com.minigenesys.agentstate: DEBUG
 

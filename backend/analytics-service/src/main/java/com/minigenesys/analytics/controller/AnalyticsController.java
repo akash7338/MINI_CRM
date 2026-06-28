@@ -20,8 +20,4 @@ public class AnalyticsController {
         return ResponseEntity.ok(analyticsService.getMetrics(tenantId));
     }
 
-    @GetMapping("/health")
-    public ResponseEntity<Map<String, String>> health() {
-        return ResponseEntity.ok(Map.of("status", "UP", "service", "analytics-service"));
-    }
 }

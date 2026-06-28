@@ -2,6 +2,7 @@ import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ApiService } from './services/api.service';
 import { SessionStateService } from './services/session-state.service';
+import { WebsocketService } from './services/websocket.service';
 import { AgentPanelComponent } from './components/agent-panel.component';
 import { CallPanelComponent } from './components/call-panel.component';
 import { MetricsPanelComponent } from './components/metrics-panel.component';
@@ -10,6 +11,7 @@ import { RecentCallsComponent } from './components/recent-calls.component';
 import { LoginComponent } from './components/login.component';
 import { CreateAgentComponent } from './components/create-agent.component';
 import { TelephonyOverlayComponent } from './components/telephony/telephony-overlay.component';
+import { DiagnosticsComponent } from './components/diagnostics.component';
 import { TelephonyService } from './services/telephony.service';
 import { FreeswitchWebRtcService } from './services/freeswitch-webrtc.service';
 
@@ -25,11 +27,55 @@ import { FreeswitchWebRtcService } from './services/freeswitch-webrtc.service';
     RecentCallsComponent,
     LoginComponent,
     CreateAgentComponent,
-    TelephonyOverlayComponent
+    TelephonyOverlayComponent,
+    DiagnosticsComponent
   ],
   template: `
-    <!-- UNAUTHENTICATED: Full-screen login -->
-    <app-login *ngIf="!isLoggedIn"></app-login>
+    <!-- UNAUTHENTICATED: Public diagnostics or login -->
+    <div *ngIf="!isLoggedIn">
+      <div style="position: fixed; top: 16px; right: 16px; z-index: 120; display: flex; gap: 8px;">
+        <button class="btn btn-outline btn-sm" (click)="publicView = 'diagnostics'">Public Diagnostics</button>
+        <button class="btn btn-outline btn-sm" (click)="publicView = 'login'">Login</button>
+      </div>
+      <div *ngIf="publicView === 'diagnostics'" class="app-layout">
+        <div class="app-main" style="margin-left: 0; width: 100%;">
+          <header class="app-header">
+            <div class="header-breadcrumb">
+              <span class="header-breadcrumb-base">Console</span>
+              <svg class="header-breadcrumb-separator" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+              <span class="header-breadcrumb-current">Public Diagnostics</span>
+            </div>
+          </header>
+          <div class="app-content">
+            <div class="section-header">
+              <div>
+                <div class="section-title">System Diagnostics</div>
+                <div class="section-subtitle">No login required — health, SIP/NAT, logs, and service controls.</div>
+              </div>
+            </div>
+            <div class="card">
+              <app-diagnostics></app-diagnostics>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div *ngIf="publicView === 'login'">
+        <!-- Session-expired / force-logout banner -->
+        <div *ngIf="kickMessage" style="
+          position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+          background: #fef3c7; border-bottom: 2px solid #f59e0b;
+          padding: 12px 24px; display: flex; align-items: center; gap: 12px;
+          font-size: 14px; color: #92400e; font-weight: 500;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+            <line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+          {{ kickMessage }}
+          <button style="margin-left: auto; background: none; border: none; cursor: pointer; color: #92400e; font-size: 18px; line-height: 1;" (click)="kickMessage = ''">✕</button>
+        </div>
+        <app-login [style.marginTop]="kickMessage ? '52px' : '0'"></app-login>
+      </div>
+    </div>
 
     <!-- AUTHENTICATED: Full app layout -->
     <div class="app-layout" *ngIf="isLoggedIn">
@@ -63,6 +109,12 @@ import { FreeswitchWebRtcService } from './services/freeswitch-webrtc.service';
             <div class="nav-link" [class.active]="view === 'audit'" (click)="view = 'audit'">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
               Audit Trail
+            </div>
+
+            <div class="sidebar-section-label" style="margin-top: 12px;">System</div>
+            <div class="nav-link" [class.active]="view === 'diagnostics'" (click)="view = 'diagnostics'">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+              Diagnostics
             </div>
           </ng-container>
 
@@ -172,6 +224,22 @@ import { FreeswitchWebRtcService } from './services/freeswitch-webrtc.service';
                   </div>
                 </div>
               </div>
+
+              <div *ngIf="view === 'diagnostics'" class="animate-fade-in">
+                <div class="section-header">
+                  <div>
+                    <div class="section-title">System Diagnostics</div>
+                    <div class="section-subtitle">Infrastructure health, SIP/NAT status, and service logs</div>
+                  </div>
+                  <div class="live-indicator">
+                    <div class="live-indicator-dot"></div>
+                    LIVE
+                  </div>
+                </div>
+                <div class="card">
+                  <app-diagnostics></app-diagnostics>
+                </div>
+              </div>
             </ng-container>
 
             <!-- AGENT VIEWS -->
@@ -205,59 +273,178 @@ import { FreeswitchWebRtcService } from './services/freeswitch-webrtc.service';
         </div>
       </div>
     </div>
-  `
+  `,
 })
 export class AppComponent {
   isLoggedIn = false;
+  publicView: 'diagnostics' | 'login' = 'login';
   role = '';
   view = 'overview';
   currentAgentId = '';
+  /** Shown as a banner above the login form after a forced kick. */
+  kickMessage = '';
   private loggingOut = false;
 
   constructor(
-    private api: ApiService, 
-    private session: SessionStateService, 
+    private api: ApiService,
+    private session: SessionStateService,
+    private ws: WebsocketService,
     private telephony: TelephonyService,
     private freeswitchWebRtc: FreeswitchWebRtcService
   ) {
-    const token = localStorage.getItem('token');
-    const role = localStorage.getItem('role');
-    
-    if (token && role) {
-      this.isLoggedIn = true;
-      this.role = role;
-      this.view = role === 'SUPERVISOR' ? 'overview' : 'workspace';
-      
-      const agentId = localStorage.getItem('agentId');
-      if (agentId) {
-        this.api.setAgentId(agentId);
-      }
+    // -----------------------------------------------------------------------
+    // Spec §5.1 — Tab initialization
+    // -----------------------------------------------------------------------
+
+    // If the user was force-logged-out in a previous session (by the kick mechanism),
+    // localStorage['reason'] will be set. We show the message on the login screen and
+    // do NOT try to auto-reconnect (spec: only auto-reconnect if within reconnect window
+    // and no prior kick indication).
+    const kickReason = sessionStorage.getItem('reason');
+    if (kickReason) {
+      this.kickMessage = kickReason === 'LOGOUT_AGENT'
+        ? 'Your session was taken over by another tab. Please sign in again.'
+        : 'Your session has expired. Please sign in again.';
+      this.setupSubscriptions();
+      return;
     }
 
+    const token = localStorage.getItem('token');
+    const role  = localStorage.getItem('role');
+
+    if (token && role) {
+      this.role = role;
+      this.view = role === 'SUPERVISOR' ? 'overview' : 'workspace';
+      this.isLoggedIn = true;
+      const agentId = localStorage.getItem('agentId');
+      if (agentId) this.api.setAgentId(agentId);
+
+      this.api.activateSession().subscribe({
+        next: () => {
+          console.log('[Session] Activated — this tab now owns the session.');
+          this.subscribeToUserChannel();
+          this.restoreAgentState();
+          this.initializeTelephony(localStorage.getItem('agentId') || '');
+        },
+        error: (err) => {
+          console.warn('[Session] activate failed:', err);
+          this.finalizeLogout();
+        }
+      });
+    }
+
+    this.setupSubscriptions();
+  }
+
+  /** Wire up the streams that are active for the entire app lifetime. */
+  private setupSubscriptions() {
     this.session.agent$.subscribe(state => this.currentAgentId = state.agentId);
 
-    // Reactively initialize telephony when agent ID is set (e.g. after login)
-    this.api.agentId$.subscribe(agentId => {
-      if (agentId && this.role === 'AGENT') {
-        const provider = localStorage.getItem('telephonyProvider') || 'TWILIO';
-        if (provider === 'TWILIO') {
-          console.log('[Telephony] Initializing Twilio voice for agent:', agentId);
-          this.telephony.initialize(agentId);
-        } else if (provider === 'FREESWITCH') {
-          console.log('[Telephony] Initializing FreeSWITCH WebRTC voice for agent:', agentId);
-          this.freeswitchWebRtc.initialize(agentId);
+    // HTTP fallback path (spec §5.2 Path B): 403 TOKEN_EXPIRED caught by
+    // forceLogoutInterceptor in main.ts → notifyForceLogout() → sessionRevoked$ emits.
+    this.api.sessionRevoked$.subscribe(() => {
+      console.warn('[Session] Force-logout triggered — showing login with reason.');
+      this.session.stopHeartbeat();
+      this.freeswitchWebRtc.stop();
+      this.kickMessage = sessionStorage.getItem('reason') === 'LOGOUT_AGENT'
+        ? 'Your session was taken over by another tab. Please sign in again.'
+        : 'Your session has expired. Please sign in again.';
+      this.isLoggedIn = false;
+    });
+
+    // WebSocket push path (spec §5.2 Path A): LogoutNotification from
+    // /topic/{tenantId}/user/{userId} arrives near-instantly after the new tab's
+    // /activate completes on the server.
+    // IMPORTANT: compare kickedJti with this tab's current token jti.
+    // If they differ, this tab is the NEW winner and must ignore the notification —
+    // the notification was meant for the old tab that got kicked.
+    this.ws.userEvents$.subscribe((event: any) => {
+      if (event?.type === 'LogoutNotification') {
+        const myJti = this.getJtiFromToken();
+        const kickedJti = event.kickedJti as string | undefined;
+        if (kickedJti && myJti && kickedJti !== myJti) {
+          console.log('[Session] LogoutNotification ignored — kickedJti does not match my token (I am the winner).');
+          return;
         }
+        const reason = event.reason || 'LOGOUT_AGENT';
+        console.warn('[Session] WebSocket LogoutNotification accepted — kicking this tab. reason:', reason);
+        this.api.notifyForceLogout(reason);
       }
     });
 
-    // Handle successful login from LoginComponent
+    // Successful credential-based login from LoginComponent.
     this.api.loginSuccess$.subscribe(success => {
       if (success) {
+        this.kickMessage = '';
         this.isLoggedIn = true;
         this.role = localStorage.getItem('role') || '';
         this.view = this.role === 'SUPERVISOR' ? 'overview' : 'workspace';
+        this.ws.connect();
+        this.subscribeToUserChannel();
+        this.restoreAgentState();
+        this.initializeTelephony(localStorage.getItem('agentId') || '');
       }
     });
+
+    this.api.agentId$.subscribe(agentId => {
+      if (agentId && this.isLoggedIn) this.initializeTelephony(agentId);
+    });
+  }
+
+  /** Extract userId from the active in-memory JWT (safe client-side decode, no verify). */
+  private getUserIdFromToken(): string {
+    return this.decodeTokenPayload()?.['sub'] || '';
+  }
+
+  /** Extract jti from the active in-memory JWT — used to filter LogoutNotifications. */
+  private getJtiFromToken(): string {
+    return this.decodeTokenPayload()?.['jti'] || '';
+  }
+
+  private decodeTokenPayload(): Record<string, any> | null {
+    const token = this.api.getTokenForRequest() || localStorage.getItem('token');
+    if (!token) return null;
+    try {
+      return JSON.parse(atob(token.split('.')[1]));
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Load agent state and subscribe to tenant events AFTER the session is
+   * established (_token is set). Previously this ran in the SessionStateService
+   * constructor which raced with /activate — HTTP requests carrying the old
+   * token would hit the blacklist and 403 this tab out of its own session.
+   */
+  private restoreAgentState() {
+    const agentId = localStorage.getItem('agentId');
+    if (agentId) {
+      this.session.loadInitialState(agentId);
+      this.ws.subscribeToTenantEvents();
+    }
+  }
+
+  /** Subscribe to the user's personal STOMP topic for logout notifications. */
+  private subscribeToUserChannel() {
+    const userId = this.getUserIdFromToken();
+    if (userId) {
+      this.ws.subscribeToUserChannel(userId);
+    }
+  }
+
+  private initializeTelephony(agentId: string) {
+    const role = this.role || localStorage.getItem('role') || '';
+    if (!agentId || role !== 'AGENT') return;
+
+    const provider = localStorage.getItem('telephonyProvider') || 'TWILIO';
+    if (provider === 'TWILIO') {
+      console.log('[Telephony] Initializing Twilio voice for agent:', agentId);
+      this.telephony.initialize(agentId);
+    } else if (provider === 'FREESWITCH') {
+      console.log('[Telephony] Initializing FreeSWITCH WebRTC voice for agent:', agentId);
+      this.freeswitchWebRtc.initialize(agentId);
+    }
   }
 
   getViewTitle(): string {
@@ -266,6 +453,7 @@ export class AppComponent {
       'agents': 'Agent Management',
       'calls': 'Call History',
       'audit': 'Audit Trail',
+      'diagnostics': 'Diagnostics',
       'workspace': 'Workspace',
       'activity': 'Activity Log'
     };
@@ -277,11 +465,11 @@ export class AppComponent {
     this.loggingOut = true;
 
     const agentId = localStorage.getItem('agentId');
-    const role = localStorage.getItem('role');
-    
+    const role    = localStorage.getItem('role');
+
     if (role === 'AGENT' && agentId) {
       this.api.updateAgentStatus(agentId, 'logout').subscribe({
-        next: () => this.finalizeLogout(),
+        next:  () => this.finalizeLogout(),
         error: () => this.finalizeLogout()
       });
     } else {
@@ -290,7 +478,9 @@ export class AppComponent {
   }
 
   private finalizeLogout() {
+    this.freeswitchWebRtc.stop();
     this.api.logout();
+    this.kickMessage = '';
     this.isLoggedIn = false;
     this.loggingOut = false;
   }

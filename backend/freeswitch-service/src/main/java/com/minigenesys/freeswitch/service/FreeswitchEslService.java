@@ -263,6 +263,24 @@ public class FreeswitchEslService {
         }
     }
 
+    public boolean isConnected() {
+        return client != null;
+    }
+
+    public String executeSyncApiCommand(String command, String args) {
+        Client c = client;
+        if (c == null) {
+            throw new IllegalStateException("FreeSWITCH ESL client is not connected.");
+        }
+        org.freeswitch.esl.client.transport.message.EslMessage response =
+                c.sendSyncApiCommand(command, args);
+        StringBuilder sb = new StringBuilder();
+        for (String line : response.getBodyLines()) {
+            sb.append(line).append("\n");
+        }
+        return sb.toString().trim();
+    }
+
     @PreDestroy
     public void stop() {
         running.set(false);

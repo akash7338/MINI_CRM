@@ -4,6 +4,11 @@ server:
 spring:
   application:
     name: api-gateway
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
   cloud:
     gateway:
       default-filters:
@@ -39,6 +44,10 @@ spring:
           uri: ${SERVICES_TELEPHONY_URL:http://localhost:8092}
           predicates:
             - Path=/api/v1/telephony/**
+        - id: diagnostics-service
+          uri: ${SERVICES_DIAGNOSTICS_URL:http://localhost:8094}
+          predicates:
+            - Path=/api/v1/diagnostics/**
       globalcors:
         cors-configurations:
           '[/**]':
@@ -54,5 +63,7 @@ jwt:
   expirationMs: 3600000 # 1 hour
 
 logging:
+  file:
+    name: ${LOG_FILE:logs/api-gateway.log}
   level:
     com.minigenesys.apigateway: DEBUG

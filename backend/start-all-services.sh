@@ -19,8 +19,10 @@ start_service() {
     local dir=$1
     local name=$2
     echo "Starting $name..."
-    # With a root multi-project build, we run the gradle wrapper from the root directory
-    ./gradlew :$name:bootRun > "logs/$name.log" 2>&1 &
+    # With a root multi-project build, we run the gradle wrapper from the root directory.
+    # Console (stdout/stderr) goes to <name>.console.log; structured app logs are written
+    # by Spring to logs/<name>.log via logging.file.name (read by diagnostics-service).
+    ./gradlew :$name:bootRun > "logs/$name.console.log" 2>&1 &
     echo $! > "logs/$name.pid"
     sleep 2 # Let it start initializing
 }
@@ -40,6 +42,7 @@ if ! ps aux | grep FreeswitchServiceApplication | grep -v grep > /dev/null; then
 else
     echo "freeswitch-service is already running."
 fi
+start_service "diagnostics-service" "diagnostics-service"
 start_service "api-gateway" "api-gateway"
 
 echo "=== All services launched. Logs are in backend/logs/ ==="

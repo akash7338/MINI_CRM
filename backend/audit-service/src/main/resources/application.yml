@@ -28,5 +28,7 @@ server:
   port: 8091
 
 logging:
+  file:
+    name: ${LOG_FILE:logs/audit-service.log}
   level:
     com.minigenesys.audit: INFO

@@ -1,7 +1,18 @@
 spring:
   application:
     name: user-service
-  
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+  kafka:
+    bootstrap-servers: ${KAFKA_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/minigenesys_users}
     username: ${DB_USER:postgres}
@@ -24,6 +35,8 @@ jwt:
   expirationMs: 3600000
 
 logging:
+  file:
+    name: ${LOG_FILE:logs/user-service.log}
   level:
     com.minigenesys.userservice: DEBUG
 

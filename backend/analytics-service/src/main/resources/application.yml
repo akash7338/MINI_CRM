@@ -28,5 +28,7 @@ server:
   port: 8089
 
 logging:
+  file:
+    name: ${LOG_FILE:logs/analytics-service.log}
   level:
     com.minigenesys.analytics: INFO

@@ -39,9 +39,9 @@ export class FreeswitchWebRtcService {
 
       this.ua.on('connected', () => console.log('FreeSWITCH WebSocket Connected'));
       this.ua.on('disconnected', () => console.log('FreeSWITCH WebSocket Disconnected'));
-      this.ua.on('registered', () => console.log('FreeSWITCH SIP UA Registered'));
+      this.ua.on('registered', () => console.log('FreeSWITCH SIP UA Registered as', config.uri));
       this.ua.on('unregistered', () => console.log('FreeSWITCH SIP UA Unregistered'));
-      this.ua.on('registrationFailed', (e: any) => console.error('FreeSWITCH SIP UA Registration Failed:', e));
+      this.ua.on('registrationFailed', (e: any) => console.error('FreeSWITCH SIP UA Registration Failed:', e?.cause, e));
 
       this.ua.on('newRTCSession', (data: any) => {
         const session = data.session;
@@ -95,6 +95,25 @@ export class FreeswitchWebRtcService {
     } catch (e) {
       console.error('Failed to initialize JsSIP client:', e);
     }
+  }
+
+  /**
+   * Tear down the JsSIP user agent and release the SIP registration.
+   * Called when this tab is no longer the active session so it stops
+   * competing for the agent's single FreeSWITCH registration.
+   */
+  stop() {
+    try {
+      if (this.ua) {
+        this.ua.stop(); // sends un-REGISTER and closes the WebSocket
+        this.ua = null;
+        console.log('[Telephony] FreeSWITCH WebRTC stopped (registration released)');
+      }
+    } catch (e) {
+      console.error('Failed to stop JsSIP client:', e);
+      this.ua = null;
+    }
+    this.cleanupSession();
   }
 
   acceptCall(session: any) {

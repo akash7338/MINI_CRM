@@ -28,15 +28,37 @@ A standardized format for describing a media session.
              While modern carriers like Telnyx use Symmetric RTP (Media Latching) to bypass broken SDP IPs, 
              configuring STUN here is still mandatory best-practice to prevent one-way audio if FreeSWITCH 
              answers a call silently without playing media first. -->
-        <param name="ext-sip-ip" value="stun:stun.l.google.com:19302"/>  <!-- tells FreeSWITCH to automatically detect its external IP address via STUN -->
-        <param name="rtp-ip" value="0.0.0.0"/> <!-- 0.0.0.0 tells FreeSWITCH to listen for media (RTP) traffic on all available network interfaces inside the container. -->
-        <param name="ext-rtp-ip" value="stun:stun.l.google.com:19302"/> <!-- tells FreeSWITCH to automatically detect its external IP address for media traffic via STUN -->
+        <param name="ext-sip-ip" value="stun:stun.l.google.com:19302"/>
+        <param name="rtp-ip" value="0.0.0.0"/>
+        <param name="ext-rtp-ip" value="stun:stun.l.google.com:19302"/>
         <param name="sip-port" value="5060"/> <!-- Standard SIP port for incoming/outgoing calls over the PSTN/SIP trunks. -->
         <param name="dialplan" value="XML"/> <!-- Tells FreeSWITCH to load dialplans from XML files in the dialplan directory. -->
         <param name="context" value="public"/> <!--When a SIP call enters this profile, send the call into dialplan context named public . -->
       </settings>
       <gateways>
         <!-- Placeholder for future carrier integration (e.g. Sinch/Bandwidth/Telnyx) -->
+
+        <gateway name="signalwire">
+          <param name="username" value="$${signalwire_sip_username}"/>
+          <param name="password" value="$${signalwire_sip_password}"/>
+          <param name="realm" value="$${signalwire_sip_domain}"/>
+          <param name="proxy" value="$${signalwire_sip_domain}"/>
+          <param name="register" value="true"/>
+          <!-- TCP registration: connection-oriented, so a FreeSWITCH restart instantly drops
+               the stale binding on SignalWire (no ghost registrations -> no duplicate/forked
+               inbound INVITEs). Matches the Telnyx setup that never double-dialed. -->
+          <param name="register-transport" value="tcp"/>
+          <param name="from-user" value="$${signalwire_sip_username}"/>
+          <param name="from-domain" value="$${signalwire_sip_domain}"/>
+          <param name="caller-id-in-from" value="true"/>
+          <param name="extension" value="$${signalwire_caller_id}"/>
+          <param name="ping" value="25"/>
+          <!-- Short registration lifetime so stale NAT bindings (from FreeSWITCH restarts)
+               expire in ~2 min instead of 1 hour, preventing SignalWire from forking
+               each inbound call to multiple duplicate registrations. -->
+          <param name="expire-seconds" value="120"/>
+          <param name="retry-seconds" value="30"/>
+        </gateway>
         
         <gateway name="telnyx">
           <param name="username" value="usermailakashkrsingh64252"/>
@@ -54,6 +76,7 @@ A standardized format for describing a media session.
       <settings>
         <param name="debug" value="0"/>
         <param name="sip-ip" value="0.0.0.0"/> <!-- Listen on all interfaces for SIP signaling -->
+        <param name="ext-sip-ip" value="stun:stun.l.google.com:19302"/>
         
         <!-- WebRTC Signaling (WebSockets): ext-sip-ip is mostly cosmetic here because all SIP 
              signaling is pushed through the persistent bidirectional WebSocket tunnel anyway. -->
@@ -63,6 +86,7 @@ A standardized format for describing a media session.
         <param name="apply-candidate-acl" value="lan"/> <!-- explicitly allow browser private IP in ICE -->
         <param name="rtcp_mux" value="true"/> <!-- Underscore compatibility fallback -->
         <param name="rtp-ip" value="0.0.0.0"/> <!-- Listen for RTP on all interfaces inside container -->
+        <param name="ext-rtp-ip" value="stun:stun.l.google.com:19302"/>
         
         <!-- WebRTC Media (ICE): ext-rtp-ip is strictly MANDATORY. The browser's ICE engine requires a 
              perfectly reachable candidate IP here to stream UDP audio, otherwise the call drops instantly. -->

@@ -42,6 +42,8 @@ services:
   callServiceUrl: ${CALL_SERVICE_URL:http://localhost:8087}
 
 logging:
+  file:
+    name: ${LOG_FILE:logs/freeswitch-service.log}
   level:
     com.minigenesys.freeswitch: DEBUG
     org.freeswitch.esl.client: INFO

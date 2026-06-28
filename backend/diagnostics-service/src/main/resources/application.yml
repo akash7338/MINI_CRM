@@ -1,0 +1,60 @@
+server:
+  port: 8094
+
+spring:
+  application:
+    name: diagnostics-service
+
+diagnostics:
+  log-path: ${DIAGNOSTICS_LOG_PATH:logs}
+  services:
+    api-gateway:
+      url: ${SERVICES_GATEWAY_URL:http://localhost:8080}
+      health-path: /actuator/health
+    user-service:
+      url: ${SERVICES_USER_URL:http://localhost:8090}
+      health-path: /api/v1/users/health
+    agent-state-service:
+      url: ${SERVICES_AGENT_STATE_URL:http://localhost:8086}
+      health-path: /api/v1/agents/health
+    call-service:
+      url: ${SERVICES_CALL_URL:http://localhost:8087}
+      health-path: /api/v1/calls/health
+    routing-service:
+      url: ${SERVICES_ROUTING_URL:http://localhost:8085}
+      health-path: /api/v1/routing/health
+    websocket-gateway:
+      url: ${SERVICES_WEBSOCKET_URL:http://localhost:8088}
+      health-path: /api/v1/websocket/health
+    telephony-service:
+      url: ${SERVICES_TELEPHONY_URL:http://localhost:8092}
+      health-path: /api/v1/telephony/health
+    freeswitch-service:
+      url: ${SERVICES_FREESWITCH_URL:http://localhost:8093}
+      health-path: /api/v1/freeswitch/health
+    analytics-service:
+      url: ${SERVICES_ANALYTICS_URL:http://localhost:8089}
+      health-path: /api/v1/analytics/health
+    audit-service:
+      url: ${SERVICES_AUDIT_URL:http://localhost:8091}
+      health-path: /api/v1/audit/health
+
+  infrastructure:
+    postgres:
+      host: ${DB_HOST:localhost}
+      port: ${DB_PORT:5432}
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+    kafka:
+      host: ${KAFKA_HOST:localhost}
+      port: ${KAFKA_PORT:9092}
+    freeswitch-esl:
+      host: ${FREESWITCH_ESL_HOST:localhost}
+      port: ${FREESWITCH_ESL_PORT:8022}
+
+logging:
+  file:
+    name: ${LOG_FILE:logs/diagnostics-service.log}
+  level:
+    com.minigenesys.diagnostics: DEBUG

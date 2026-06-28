@@ -20,4 +20,14 @@
     container's public elastic IP here on boot.
   -->
   <X-PRE-PROCESS cmd="set" data="external_rtp_ip=192.168.1.4"/>
+
+  <!--
+    SignalWire SIP trunk registration.
+    Fill these locally after creating the SignalWire SIP Credential.
+    Do not commit a real password.
+  -->
+  <X-PRE-PROCESS cmd="set" data="signalwire_sip_username=minigenesys-freeswitch"/>
+  <X-PRE-PROCESS cmd="set" data="signalwire_sip_password=password123"/>
+  <X-PRE-PROCESS cmd="set" data="signalwire_sip_domain=mininextiva-8ae3316fb31e.sip.signalwire.com"/>
+  <X-PRE-PROCESS cmd="set" data="signalwire_caller_id=+12015021835"/>
 </include>

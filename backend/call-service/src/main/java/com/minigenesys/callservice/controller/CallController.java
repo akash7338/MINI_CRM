@@ -54,8 +54,4 @@ public class CallController {
         return ResponseEntity.ok(callService.rejectCall(callId, tenantId));
     }
 
-    @GetMapping("/health")
-    public ResponseEntity<Map<String, String>> health() {
-        return ResponseEntity.ok(Map.of("status", "UP"));
-    }
 }

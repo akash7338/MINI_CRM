@@ -34,6 +34,12 @@ dependencies {
     implementation 'com.fasterxml.jackson.core:jackson-databind'
     implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
     
+    // Redis — session store + token blacklist
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+
+    // Kafka — publish LogoutNotification events to websocket-gateway
+    implementation 'org.springframework.kafka:spring-kafka'
+
     // Database
     runtimeOnly 'org.postgresql:postgresql'
     

@@ -1,7 +1,8 @@
-import { Component } from '@angular/core';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../services/api.service';
+import { DiagnosticsService } from '../services/diagnostics.service';
 
 @Component({
   selector: 'app-login',
@@ -32,6 +33,35 @@ import { ApiService } from '../services/api.service';
             <h1 class="login-title">Sign In to Workspace</h1>
             <p class="login-subtitle">Enter your credentials to access the admin dashboard.</p>
           </div>
+
+          <div class="login-health-card" *ngIf="publicHealth; else healthUnavailable">
+            <div class="login-health-row">
+              <div class="login-health-label">System Health</div>
+              <div class="login-health-pill" [class.degraded]="publicHealth.overall !== 'UP'">
+                <span class="login-health-dot"></span>
+                {{ publicHealth.overall }}
+              </div>
+            </div>
+            <div class="login-health-meta">
+              Services: {{ publicHealth.counts?.servicesUp ?? 0 }} up / {{ publicHealth.counts?.servicesDown ?? 0 }} down
+            </div>
+            <div class="login-health-meta">
+              Infra: {{ publicHealth.counts?.infraUp ?? 0 }} up / {{ publicHealth.counts?.infraDown ?? 0 }} down
+            </div>
+          </div>
+
+          <ng-template #healthUnavailable>
+            <div class="login-health-card degraded" *ngIf="healthError">
+              <div class="login-health-row">
+                <div class="login-health-label">System Health</div>
+                <div class="login-health-pill degraded">
+                  <span class="login-health-dot"></span>
+                  UNAVAILABLE
+                </div>
+              </div>
+              <div class="login-health-meta">{{ healthError }}</div>
+            </div>
+          </ng-template>
 
           <div *ngIf="error" class="alert alert-error" style="margin-bottom: 20px;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
@@ -189,6 +219,64 @@ import { ApiService } from '../services/api.service';
       margin-bottom: 28px;
     }
 
+    .login-health-card {
+      margin-bottom: 20px;
+      padding: 12px 14px;
+      border: 1px solid #D1FAE5;
+      background: #ECFDF5;
+      border-radius: 10px;
+    }
+
+    .login-health-card.degraded {
+      border-color: #FECACA;
+      background: #FEF2F2;
+    }
+
+    .login-health-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
+    .login-health-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #334155;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .login-health-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #065F46;
+      background: #D1FAE5;
+      border-radius: 9999px;
+      padding: 3px 8px;
+    }
+
+    .login-health-pill.degraded {
+      color: #991B1B;
+      background: #FECACA;
+    }
+
+    .login-health-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .login-health-meta {
+      font-size: 12px;
+      color: #475569;
+      line-height: 1.4;
+    }
+
     .login-title {
       font-size: 20px;
       font-weight: 700;
@@ -341,12 +429,43 @@ import { ApiService } from '../services/api.service';
     }
   `]
 })
-export class LoginComponent {
+export class LoginComponent implements OnInit, OnDestroy {
   credentials = { username: '', password: '' };
   error = '';
   loading = false;
+  healthError = '';
+  publicHealth: any = null;
+  private healthTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(private api: ApiService) {}
+  constructor(
+    private api: ApiService,
+    private diagnosticsService: DiagnosticsService
+  ) {}
+
+  ngOnInit(): void {
+    this.refreshPublicHealth();
+    this.healthTimer = setInterval(() => this.refreshPublicHealth(), 15000);
+  }
+
+  ngOnDestroy(): void {
+    if (this.healthTimer) {
+      clearInterval(this.healthTimer);
+      this.healthTimer = null;
+    }
+  }
+
+  private refreshPublicHealth(): void {
+    this.diagnosticsService.getPublicHealth().subscribe({
+      next: (response) => {
+        this.publicHealth = response;
+        this.healthError = '';
+      },
+      error: () => {
+        this.publicHealth = null;
+        this.healthError = 'Public diagnostics endpoint is unreachable.';
+      }
+    });
+  }
 
   onSubmit() {
     this.loading = true;
