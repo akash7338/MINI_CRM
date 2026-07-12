@@ -20,7 +20,7 @@
     <!-- TCP port the Event Socket listens on inside the container (mapped to 8022 on host OS) -->
     <param name="listen-port" value="8021"/>
     <!-- Password required for Event Socket authentication -->
-    <param name="password" value="ClueCon"/>
+    <param name="password" value="CHANGE_ME"/>
     <!-- References the access control list (ACL) to restrict allowed inbound connection IPs -->
     <param name="apply-inbound-acl" value="0.0.0.0/0"/>
     <!-- Prevents FreeSWITCH engine from shutting down if Event Socket fails to bind (e.g., port in use) -->

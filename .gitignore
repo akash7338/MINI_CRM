@@ -44,3 +44,5 @@ docker/freeswitch/recordings/
 
 # FreeSWITCH credentials
 docker/freeswitch/conf/autoload_configs/sofia.conf.xml
+docker/freeswitch/conf/autoload_configs/event_socket.conf.xml
+docker/freeswitch/conf/vars.xml

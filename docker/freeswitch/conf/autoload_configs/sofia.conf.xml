@@ -64,8 +64,8 @@ A standardized format for describing a media session.
         </gateway>
         
         <gateway name="telnyx">
-          <param name="username" value="usermailakashkrsingh64252"/>
-          <param name="password" value="wI2=rCcUVMvk"/>
+          <param name="username" value="$${telnyx_sip_username}"/>
+          <param name="password" value="$${telnyx_sip_password}"/>
           <param name="proxy" value="sip.telnyx.com"/>
           <param name="register" value="true"/>
           <param name="register-transport" value="tcp"/>
