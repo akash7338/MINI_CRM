@@ -1,0 +1,29 @@
+server:
+  port: 8095
+
+spring:
+  application:
+    name: contact-service
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:minigenesys_contacts}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+
+logging:
+  file:
+    name: ${LOG_FILE:logs/contact-service.log}
+  level:
+    com.minigenesys.contactservice: DEBUG
+    org.springframework.web: INFO
+    org.hibernate.SQL: DEBUG

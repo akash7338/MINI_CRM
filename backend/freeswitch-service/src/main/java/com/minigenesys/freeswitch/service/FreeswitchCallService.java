@@ -1,6 +1,7 @@
 package com.minigenesys.freeswitch.service;
 
 import com.minigenesys.common.dto.RoutingEvent;
+import com.minigenesys.common.dto.OutboundCallEvent;
 import com.minigenesys.freeswitch.model.FreeswitchCallSession;
 import com.minigenesys.freeswitch.repository.FreeswitchCallSessionRepository;
 import lombok.RequiredArgsConstructor;
@@ -63,6 +64,49 @@ public class FreeswitchCallService {
             eslService.originateCallToAgent(event.getAgentId(), agentUuid, session.getCustomerUuid(), session.getCallerId());
         } catch (Exception e) {
             log.error("Failed to originate call to agent {}: {}", event.getAgentId(), e.getMessage(), e);
+        }
+    }
+
+    @Transactional
+    public void handleOutboundCall(OutboundCallEvent event) {
+        log.info("Processing outbound call: callId={}, agentId={}, toNumber={}", 
+                event.getCallId(), event.getAgentId(), event.getToNumber());
+
+        // Generate UUIDs for agent and customer legs
+        String conferenceUuid = event.getCallId(); // Use callId as conference room identifier
+        String agentUuid = UUID.randomUUID().toString();
+        String customerUuid = UUID.randomUUID().toString();
+
+        // Create session for outbound call
+        FreeswitchCallSession session = FreeswitchCallSession.builder()
+                .customerUuid(customerUuid)
+                .internalCallId(event.getCallId())
+                .tenantId(event.getTenantId())
+                .callerId(event.getCallerId())
+                .toNumber(event.getToNumber())
+                .direction("OUTBOUND")
+                .assignedAgentId(event.getAgentId())
+                .agentUuid(agentUuid)
+                .status("DIALING_AGENT")
+                .build();
+        
+        repository.save(session);
+        log.info("Created outbound FreeSWITCH session: customerUuid={}, agentUuid={}, callId={}", 
+                customerUuid, agentUuid, event.getCallId());
+
+        // Originate the outbound call (agent + customer)
+        try {
+            eslService.originateOutboundCall(
+                event.getAgentId(), 
+                event.getToNumber(), 
+                event.getCallerId(),
+                conferenceUuid,
+                agentUuid,
+                customerUuid
+            );
+            log.info("Successfully originated outbound call for callId: {}", event.getCallId());
+        } catch (Exception e) {
+            log.error("Failed to originate outbound call for callId {}: {}", event.getCallId(), e.getMessage(), e);
         }
     }
 }

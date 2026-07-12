@@ -1,0 +1,88 @@
+<div class="dialpad-modal-container">
+  <div class="dialpad-container">
+    <div class="dialpad-header">
+      <h2>Dialpad</h2>
+      <button class="close-button" (click)="onClose()" [disabled]="isDialing">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+
+    @if (callInProgress) {
+      <div class="call-progress-overlay">
+        <div class="call-progress-content">
+          <div class="call-progress-spinner">
+            <svg width="60" height="60" viewBox="0 0 50 50">
+              <circle cx="25" cy="25" r="20" fill="none" stroke="#4caf50" stroke-width="4" stroke-dasharray="31.4 31.4" stroke-linecap="round">
+                <animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="1s" repeatCount="indefinite"/>
+              </circle>
+            </svg>
+          </div>
+          <div class="call-progress-text">
+            <div class="call-progress-title">Calling {{ formatPhoneNumber() }}</div>
+            <div class="call-progress-subtitle">Please wait while we connect your call...</div>
+          </div>
+        </div>
+      </div>
+    }
+
+    <div class="phone-display">
+      <input 
+        type="text" 
+        [(ngModel)]="phoneNumber" 
+        class="phone-input" 
+        placeholder="Enter number"
+        (input)="errorMessage = ''"
+      />
+      <div class="formatted-number">{{ formatPhoneNumber() }}</div>
+    </div>
+
+    @if (errorMessage) {
+      <div class="error-message">{{ errorMessage }}</div>
+    }
+
+    <div class="dialpad-grid">
+      @for (row of dialpadButtons; track row) {
+        <div class="dialpad-row" [class.single-button]="row.length === 1">
+          @for (digit of row; track digit) {
+            <button 
+              class="dialpad-button" 
+              [class.plus-button]="digit === '+'"
+              (click)="onDigitClick(digit)"
+              [disabled]="isDialing || callInProgress"
+            >
+              {{ digit }}
+            </button>
+          }
+        </div>
+      }
+    </div>
+
+    <div class="dialpad-actions">
+      <button 
+        class="action-button backspace-button" 
+        (click)="onBackspace()"
+        [disabled]="!phoneNumber || isDialing || callInProgress"
+      >
+        <span>⌫</span>
+      </button>
+      <button 
+        class="action-button call-button" 
+        (click)="onDial()"
+        [disabled]="!phoneNumber || isDialing || callInProgress"
+      >
+        <span>📞</span>
+        {{ isDialing ? 'Dialing...' : 'Call' }}
+      </button>
+      <button 
+        class="action-button clear-button" 
+        (click)="onClear()"
+        [disabled]="!phoneNumber || isDialing || callInProgress"
+      >
+        <span>Clear</span>
+      </button>
+    </div>
+  </div>
+</div>

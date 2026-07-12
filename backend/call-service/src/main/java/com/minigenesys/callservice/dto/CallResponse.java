@@ -17,12 +17,16 @@ public class CallResponse {
     private String id;
     private String tenantId;
     private String callerId;
+    private String toNumber;
+    private String direction;
     private Set<String> requiredSkills;
     private Integer priority;
     private CallStatus status;
     private String assignedAgentId;
     private String routingFailureReason;
     private String telephonyProvider;
+    private String disposition;
+    private String wrapUpNotes;
     private Instant createdAt;
     private Instant updatedAt;
 }

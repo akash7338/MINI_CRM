@@ -1,0 +1,187 @@
+<div class="contacts-container">
+  <div class="contacts-header">
+    <h2>Contacts</h2>
+    <button class="btn-primary" (click)="openAddModal()">
+      + Add Contact
+    </button>
+  </div>
+
+  <div class="search-bar">
+    <input 
+      type="text" 
+      [(ngModel)]="searchQuery" 
+      (input)="onSearch()"
+      placeholder="Search contacts by name, phone, or email..."
+      class="search-input"
+    />
+  </div>
+
+  @if (successMessage) {
+    <div class="success-message">{{ successMessage }}</div>
+  }
+
+  @if (errorMessage && !showAddModal && !showEditModal) {
+    <div class="error-message">{{ errorMessage }}</div>
+  }
+
+  @if (isLoading && !showAddModal && !showEditModal) {
+    <div class="loading">Loading contacts...</div>
+  } @else if (filteredContacts.length === 0) {
+    <div class="empty-state">
+      <p>No contacts found</p>
+      <button class="btn-secondary" (click)="openAddModal()">Add your first contact</button>
+    </div>
+  } @else {
+    <div class="contacts-table-container">
+      <table class="contacts-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Phone Number</th>
+            <th>Email</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (contact of filteredContacts; track contact.id) {
+            <tr>
+              <td>{{ contact.name }}</td>
+              <td>{{ contact.phoneNumber }}</td>
+              <td>{{ contact.email || '-' }}</td>
+              <td class="actions-cell">
+                <button class="btn-action btn-dial" (click)="onQuickDial(contact.phoneNumber)" title="Call">
+                  📞
+                </button>
+                <button class="btn-action btn-edit" (click)="openEditModal(contact)" title="Edit">
+                  ✏️
+                </button>
+                <button class="btn-action btn-delete" (click)="onDeleteContact(contact.id)" title="Delete">
+                  🗑️
+                </button>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+
+  <!-- Add Contact Modal -->
+  @if (showAddModal) {
+    <div class="modal-overlay" (click)="closeAddModal()">
+      <div class="modal-content" (click)="$event.stopPropagation()">
+        <div class="modal-header">
+          <h3>Add New Contact</h3>
+          <button class="close-button" (click)="closeAddModal()">×</button>
+        </div>
+        
+        @if (errorMessage) {
+          <div class="error-message">{{ errorMessage }}</div>
+        }
+        
+        <form class="contact-form" (submit)="onAddContact()">
+          <div class="form-group">
+            <label>Name *</label>
+            <input 
+              type="text" 
+              [(ngModel)]="newContact.name" 
+              name="name"
+              required
+              class="form-input"
+            />
+          </div>
+          
+          <div class="form-group">
+            <label>Phone Number *</label>
+            <input 
+              type="tel" 
+              [(ngModel)]="newContact.phoneNumber" 
+              name="phoneNumber"
+              placeholder="+1234567890"
+              required
+              class="form-input"
+            />
+          </div>
+          
+          <div class="form-group">
+            <label>Email</label>
+            <input 
+              type="email" 
+              [(ngModel)]="newContact.email" 
+              name="email"
+              class="form-input"
+            />
+          </div>
+          
+          <div class="modal-actions">
+            <button type="button" class="btn-secondary" (click)="closeAddModal()">
+              Cancel
+            </button>
+            <button type="submit" class="btn-primary" [disabled]="isLoading">
+              {{ isLoading ? 'Adding...' : 'Add Contact' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  }
+
+  <!-- Edit Contact Modal -->
+  @if (showEditModal && editingContact) {
+    <div class="modal-overlay" (click)="closeEditModal()">
+      <div class="modal-content" (click)="$event.stopPropagation()">
+        <div class="modal-header">
+          <h3>Edit Contact</h3>
+          <button class="close-button" (click)="closeEditModal()">×</button>
+        </div>
+        
+        @if (errorMessage) {
+          <div class="error-message">{{ errorMessage }}</div>
+        }
+        
+        <form class="contact-form" (submit)="onUpdateContact()">
+          <div class="form-group">
+            <label>Name *</label>
+            <input 
+              type="text" 
+              [(ngModel)]="editingContact.name" 
+              name="name"
+              required
+              class="form-input"
+            />
+          </div>
+          
+          <div class="form-group">
+            <label>Phone Number *</label>
+            <input 
+              type="tel" 
+              [(ngModel)]="editingContact.phoneNumber" 
+              name="phoneNumber"
+              required
+              class="form-input"
+            />
+          </div>
+          
+          <div class="form-group">
+            <label>Email</label>
+            <input 
+              type="email" 
+              [(ngModel)]="editingContact.email" 
+              name="email"
+              class="form-input"
+            />
+          </div>
+          
+          <div class="modal-actions">
+            <button type="button" class="btn-secondary" (click)="closeEditModal()">
+              Cancel
+            </button>
+            <button type="submit" class="btn-primary" [disabled]="isLoading">
+              {{ isLoading ? 'Updating...' : 'Update Contact' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  }
+</div>

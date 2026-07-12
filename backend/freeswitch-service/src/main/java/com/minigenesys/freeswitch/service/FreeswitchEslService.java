@@ -131,6 +131,49 @@ public class FreeswitchEslService {
         c.sendAsyncApiCommand("originate", commandArgs);
     }
 
+    /**
+     * Originate an outbound call: dials agent first, then customer via external gateway.
+     * Both legs are joined in a conference room identified by conferenceUuid (typically the callId).
+     */
+    public void originateOutboundCall(String agentId, String toNumber, String callerId, 
+                                      String conferenceUuid, String agentUuid, String customerUuid) {
+        Client c = client;
+        if (c == null) {
+            throw new IllegalStateException("FreeSWITCH ESL client is not connected.");
+        }
+
+        // Determine agent dial string
+        String agentDialString;
+        if (agentId.startsWith("mock_") || "AG-FREESWITCH".equals(agentId)) {
+            agentDialString = "loopback/agent_ans/public";
+        } else {
+            agentDialString = "sofia/internal/" + agentId + "%localhost";
+        }
+
+        // Step 1: Originate call to agent
+        String agentCommand = "{origination_uuid=" + agentUuid +
+                ",origination_caller_id_number=" + toNumber +
+                ",origination_caller_id_name=Outbound Call" +
+                ",media_webrtc=true" +
+                ",rtp_secure_media=true" +
+                ",rtcp_mux=true" +
+                "}" + agentDialString + " &conference(" + conferenceUuid + "@default)";
+        
+        log.info("Originating outbound call - Step 1: Dialing agent {} with command: originate {}", 
+                agentId, agentCommand);
+        c.sendAsyncApiCommand("originate", agentCommand);
+
+        // Step 2: Originate call to customer via external gateway
+        // Using signalwire gateway
+        String customerCommand = "{origination_uuid=" + customerUuid +
+                ",origination_caller_id_number=" + (callerId != null ? callerId : "+12015021835") +
+                "}sofia/gateway/signalwire/" + toNumber + " &conference(" + conferenceUuid + "@default)";
+        
+        log.info("Originating outbound call - Step 2: Dialing customer {} via gateway with command: originate {}", 
+                toNumber, customerCommand);
+        c.sendAsyncApiCommand("originate", customerCommand);
+    }
+
     public void transferCustomerToConference(String customerUuid) {
         Client c = client;
         if (c == null) {

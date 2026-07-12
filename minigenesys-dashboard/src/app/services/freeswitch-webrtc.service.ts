@@ -46,49 +46,60 @@ export class FreeswitchWebRtcService {
       this.ua.on('newRTCSession', (data: any) => {
         const session = data.session;
 
-        // Only handle incoming sessions
+        // Handle both incoming and outgoing sessions
         if (session.direction === 'incoming') {
           this.zone.run(() => {
             console.log('Incoming FreeSWITCH WebRTC Session:', session);
             this.incomingSessionSubject.next(session);
           });
-
-          session.on('peerconnection', (pcData: any) => {
-            pcData.peerconnection.addEventListener('track', (event: any) => {
-              this.zone.run(() => {
-                console.log('WebRTC remote track received:', event);
-                const stream = event.streams[0];
-                if (!this.audio) {
-                  this.audio = new Audio();
-                }
-                this.audio.srcObject = stream;
-                this.audio.play().catch(err => console.error('Failed to play WebRTC audio:', err));
-              });
-            });
-          });
-
-          session.on('accepted', () => {
-            this.zone.run(() => {
-              console.log('FreeSWITCH call accepted');
-              this.incomingSessionSubject.next(null);
-              this.activeSessionSubject.next(session);
-            });
-          });
-
-          session.on('ended', () => {
-            this.zone.run(() => {
-              console.log('FreeSWITCH call ended');
-              this.cleanupSession();
-            });
-          });
-
-          session.on('failed', (e: any) => {
-            this.zone.run(() => {
-              console.error('FreeSWITCH call failed:', e);
-              this.cleanupSession();
-            });
+        } else if (session.direction === 'outgoing') {
+          this.zone.run(() => {
+            console.log('Outgoing FreeSWITCH WebRTC Session:', session);
+            this.activeSessionSubject.next(session);
           });
         }
+
+        session.on('peerconnection', (pcData: any) => {
+          pcData.peerconnection.addEventListener('track', (event: any) => {
+            this.zone.run(() => {
+              console.log('WebRTC remote track received:', event);
+              const stream = event.streams[0];
+              if (!this.audio) {
+                this.audio = new Audio();
+              }
+              this.audio.srcObject = stream;
+              this.audio.play().catch(err => console.error('Failed to play WebRTC audio:', err));
+            });
+          });
+        });
+
+        session.on('accepted', () => {
+          this.zone.run(() => {
+            console.log('FreeSWITCH call accepted');
+            this.incomingSessionSubject.next(null);
+            this.activeSessionSubject.next(session);
+          });
+        });
+
+        session.on('confirmed', () => {
+          this.zone.run(() => {
+            console.log('FreeSWITCH call confirmed (fully established)');
+          });
+        });
+
+        session.on('ended', () => {
+          this.zone.run(() => {
+            console.log('FreeSWITCH call ended');
+            this.cleanupSession();
+          });
+        });
+
+        session.on('failed', (e: any) => {
+          this.zone.run(() => {
+            console.error('FreeSWITCH call failed:', e);
+            this.cleanupSession();
+          });
+        });
       });
 
       this.ua.start();
@@ -134,6 +145,50 @@ export class FreeswitchWebRtcService {
       active.terminate();
     }
     this.cleanupSession();
+  }
+
+  /**
+   * Make an outbound call to a phone number
+   */
+  makeOutboundCall(toNumber: string) {
+    if (!this.ua) {
+      console.error('Cannot make outbound call: UA not initialized');
+      throw new Error('SIP UA not initialized');
+    }
+
+    if (!this.ua.isRegistered()) {
+      console.error('Cannot make outbound call: UA not registered');
+      throw new Error('SIP UA not registered');
+    }
+
+    console.log('Making outbound call to:', toNumber);
+
+    const options = {
+      mediaConstraints: { audio: true, video: false },
+      // Optional: add custom SIP headers if needed
+      // extraHeaders: ['X-Custom-Header: value']
+    };
+
+    try {
+      // Call via FreeSWITCH - the number will be routed through dialplan
+      this.ua.call(toNumber, options);
+    } catch (e) {
+      console.error('Failed to initiate outbound call:', e);
+      throw e;
+    }
+  }
+
+  /**
+   * Send DTMF tone during active call
+   */
+  sendDTMF(tone: string) {
+    const active = this.activeSessionSubject.value;
+    if (active) {
+      console.log('Sending DTMF tone:', tone);
+      active.sendDTMF(tone);
+    } else {
+      console.warn('Cannot send DTMF: no active session');
+    }
   }
 
   private cleanupSession() {

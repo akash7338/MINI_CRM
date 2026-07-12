@@ -2,6 +2,7 @@ package com.minigenesys.callservice.controller;
 
 import com.minigenesys.callservice.dto.CallResponse;
 import com.minigenesys.callservice.dto.CreateCallRequest;
+import com.minigenesys.callservice.dto.CreateOutboundCallRequest;
 import com.minigenesys.callservice.service.CallService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -52,6 +53,24 @@ public class CallController {
             @PathVariable String callId,
             @RequestHeader(value = "X-Tenant-Id", required = true) String tenantId) {
         return ResponseEntity.ok(callService.rejectCall(callId, tenantId));
+    }
+
+    @PostMapping("/outbound")
+    public ResponseEntity<CallResponse> createOutboundCall(
+            @RequestHeader(value = "X-Tenant-Id", required = true) String tenantId,
+            @Valid @RequestBody CreateOutboundCallRequest request) {
+        CallResponse response = callService.createOutboundCall(tenantId, request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    @PostMapping("/{callId}/disposition")
+    public ResponseEntity<CallResponse> setDisposition(
+            @PathVariable String callId,
+            @RequestHeader(value = "X-Tenant-Id", required = true) String tenantId,
+            @RequestBody Map<String, String> body) {
+        String disposition = body.get("disposition");
+        String wrapUpNotes = body.get("wrapUpNotes");
+        return ResponseEntity.ok(callService.setDisposition(callId, tenantId, disposition, wrapUpNotes));
     }
 
 }

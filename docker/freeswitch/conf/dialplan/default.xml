@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FreeSWITCH Default Context Dialplan
+  For outbound calling via external gateways (Telnyx, SignalWire)
+-->
+<include>
+  <context name="default">
+    
+    <!-- Outbound PSTN calls via SignalWire gateway -->
+    <extension name="outbound_pstn_signalwire">
+      <condition field="destination_number" expression="^(\+?1?\d{10,15})$">
+        <action application="set" data="effective_caller_id_number=${outbound_caller_id_number}"/>
+        <action application="set" data="effective_caller_id_name=MiniGenesys"/>
+        <action application="log" data="INFO Routing outbound call to $1 via SignalWire gateway"/>
+        <action application="bridge" data="sofia/gateway/signalwire/$1"/>
+      </condition>
+    </extension>
+    
+    <!-- Fallback: reject unmatched numbers -->
+    <extension name="unmatched">
+      <condition field="destination_number" expression="^(.*)$">
+        <action application="log" data="WARN No dialplan match for destination: $1"/>
+        <action application="respond" data="404 Not Found"/>
+      </condition>
+    </extension>
+    
+  </context>
+</include>

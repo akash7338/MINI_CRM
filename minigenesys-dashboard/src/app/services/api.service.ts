@@ -211,4 +211,45 @@ export class ApiService {
     options.headers = (options.headers as HttpHeaders).set('X-Tenant-Id', tenantId);
     return this.http.post(`${this.GATEWAY_URL}/api/v1/users/agents`, agentData, options);
   }
+
+  createOutboundCall(callData: any): Observable<any> {
+    const options: any = this.getHeaders();
+    if (this.tenantId) {
+      options.headers = (options.headers as HttpHeaders).set('X-Tenant-Id', this.tenantId);
+    }
+    return this.http.post(`${this.GATEWAY_URL}/api/v1/calls/outbound`, callData, options);
+  }
+
+  // Contact Management
+  getContacts(): Observable<any> {
+    const options: any = this.getHeaders();
+    if (this.tenantId) {
+      options.headers = (options.headers as HttpHeaders).set('X-Tenant-Id', this.tenantId);
+    }
+    return this.http.get(`${this.GATEWAY_URL}/api/v1/contacts`, options);
+  }
+
+  createContact(contactData: any): Observable<any> {
+    const options: any = this.getHeaders();
+    if (this.tenantId) {
+      options.headers = (options.headers as HttpHeaders).set('X-Tenant-Id', this.tenantId);
+    }
+    return this.http.post(`${this.GATEWAY_URL}/api/v1/contacts`, contactData, options);
+  }
+
+  updateContact(id: string, contactData: any): Observable<any> {
+    const options: any = this.getHeaders();
+    if (this.tenantId) {
+      options.headers = (options.headers as HttpHeaders).set('X-Tenant-Id', this.tenantId);
+    }
+    return this.http.put(`${this.GATEWAY_URL}/api/v1/contacts/${id}`, contactData, options);
+  }
+
+  deleteContact(id: string): Observable<any> {
+    const options: any = this.getHeaders();
+    if (this.tenantId) {
+      options.headers = (options.headers as HttpHeaders).set('X-Tenant-Id', this.tenantId);
+    }
+    return this.http.delete(`${this.GATEWAY_URL}/api/v1/contacts/${id}`, options);
+  }
 }

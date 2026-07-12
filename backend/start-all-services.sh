@@ -43,6 +43,7 @@ else
     echo "freeswitch-service is already running."
 fi
 start_service "diagnostics-service" "diagnostics-service"
+start_service "contact-service" "contact-service"
 start_service "api-gateway" "api-gateway"
 
 echo "=== All services launched. Logs are in backend/logs/ ==="

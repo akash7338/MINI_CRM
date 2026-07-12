@@ -15,6 +15,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import com.minigenesys.common.dto.CallLifecycleEvent;
 
 @Slf4j
@@ -36,6 +37,7 @@ public class CallService {
                 .priority(priority)
                 .status(CallStatus.QUEUED) // Initial status per requirements
                 .telephonyProvider(request.getTelephonyProvider()) // explicit, never defaulted
+                .direction("INBOUND") // Explicit for inbound calls
                 .build();
 
         call = callRepository.save(call);
@@ -49,6 +51,39 @@ public class CallService {
                 .build();
 
         callEventProducer.publishCallEvent(event);
+
+        return mapToResponse(call);
+    }
+
+    @Transactional
+    public CallResponse createOutboundCall(String tenantId, CreateOutboundCallRequest request) {
+        Integer priority = request.getPriority() != null ? request.getPriority() : 1;
+
+        Call call = Call.builder()
+                .tenantId(tenantId)
+                .callerId(request.getCallerId())
+                .toNumber(request.getToNumber())
+                .requiredSkills(request.getRequiredSkills() != null ? request.getRequiredSkills() : Set.of())
+                .priority(priority)
+                .status(CallStatus.DIALING) // Initial status for outbound
+                .assignedAgentId(request.getAgentId())
+                .telephonyProvider(request.getTelephonyProvider())
+                .direction("OUTBOUND")
+                .build();
+
+        call = callRepository.save(call);
+
+        // Publish outbound call event for processing
+        OutboundCallEvent event = OutboundCallEvent.builder()
+                .callId(call.getId())
+                .tenantId(call.getTenantId())
+                .agentId(call.getAssignedAgentId())
+                .toNumber(call.getToNumber())
+                .callerId(call.getCallerId())
+                .telephonyProvider(call.getTelephonyProvider())
+                .build();
+
+        callEventProducer.publishOutboundCallEvent(event);
 
         return mapToResponse(call);
     }
@@ -287,17 +322,37 @@ public class CallService {
         }
     }
 
+    @Transactional
+    public CallResponse setDisposition(String callId, String tenantId, String disposition, String wrapUpNotes) {
+        Call call = callRepository.findById(callId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Call not found"));
+
+        if (!call.getTenantId().equals(tenantId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
+        }
+
+        call.setDisposition(disposition);
+        call.setWrapUpNotes(wrapUpNotes);
+        call = callRepository.save(call);
+
+        return mapToResponse(call);
+    }
+
     private CallResponse mapToResponse(Call call) {
         return CallResponse.builder()
                 .id(call.getId())
                 .tenantId(call.getTenantId())
                 .callerId(call.getCallerId())
+                .toNumber(call.getToNumber())
+                .direction(call.getDirection())
                 .requiredSkills(call.getRequiredSkills())
                 .priority(call.getPriority())
                 .status(call.getStatus())
                 .assignedAgentId(call.getAssignedAgentId())
                 .routingFailureReason(call.getRoutingFailureReason())
                 .telephonyProvider(call.getTelephonyProvider())
+                .disposition(call.getDisposition())
+                .wrapUpNotes(call.getWrapUpNotes())
                 .createdAt(call.getCreatedAt())
                 .updatedAt(call.getUpdatedAt())
                 .build();

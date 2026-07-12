@@ -17,6 +17,8 @@ public class FreeswitchCallSession {
     private String internalCallId; // call-service Call ID
     private String tenantId;
     private String callerId;
+    private String toNumber; // Destination number for outbound calls
+    private String direction; // "INBOUND" | "OUTBOUND"
     private String assignedAgentId;
     private String agentUuid; // FreeSWITCH Channel UUID for the agent call leg
     private String status; // PARKED, DIALING_AGENT, BRIDGED, COMPLETED

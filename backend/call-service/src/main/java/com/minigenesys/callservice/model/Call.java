@@ -56,6 +56,35 @@ public class Call {
             columnDefinition = "VARCHAR(32) DEFAULT 'TWILIO'")
     private String telephonyProvider;
 
+    /**
+     * Direction of the call.
+     * Values: "INBOUND" | "OUTBOUND".
+     * Default is INBOUND for backward compatibility.
+     */
+    @Column(name = "direction", nullable = false,
+            columnDefinition = "VARCHAR(10) DEFAULT 'INBOUND'")
+    private String direction;
+
+    /**
+     * Destination phone number for outbound calls (E.164 format).
+     * Null for inbound calls.
+     */
+    @Column(name = "to_number")
+    private String toNumber;
+
+    /**
+     * Call disposition/outcome recorded after call completion.
+     * Values: "ANSWERED" | "NO_ANSWER" | "BUSY" | "VOICEMAIL" | "FAILED".
+     */
+    @Column(name = "disposition")
+    private String disposition;
+
+    /**
+     * Agent's wrap-up notes entered after call completion.
+     */
+    @Column(name = "wrap_up_notes", columnDefinition = "TEXT")
+    private String wrapUpNotes;
+
     @CreationTimestamp
     private Instant createdAt;
 

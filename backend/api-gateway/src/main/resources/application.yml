@@ -32,6 +32,10 @@ spring:
           uri: ${SERVICES_CALL_URL:http://localhost:8087}
           predicates:
             - Path=/api/v1/calls/**
+        - id: contact-service
+          uri: ${SERVICES_CONTACT_URL:http://localhost:8095}
+          predicates:
+            - Path=/api/v1/contacts/**
         - id: analytics-service
           uri: ${SERVICES_ANALYTICS_URL:http://localhost:8089}
           predicates:

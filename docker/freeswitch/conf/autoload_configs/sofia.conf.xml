@@ -32,6 +32,9 @@ A standardized format for describing a media session.
         <param name="rtp-ip" value="0.0.0.0"/>
         <param name="ext-rtp-ip" value="stun:stun.l.google.com:19302"/>
         <param name="sip-port" value="5060"/> <!-- Standard SIP port for incoming/outgoing calls over the PSTN/SIP trunks. -->
+        <param name="codec-prefs" value="PCMU,PCMA,G722"/> <!-- SignalWire/Telnyx trunks expect standard PSTN codecs -->
+        <param name="inbound-codec-prefs" value="PCMU,PCMA,G722"/>
+        <param name="outbound-codec-prefs" value="PCMU,PCMA,G722"/>
         <param name="dialplan" value="XML"/> <!-- Tells FreeSWITCH to load dialplans from XML files in the dialplan directory. -->
         <param name="context" value="public"/> <!--When a SIP call enters this profile, send the call into dialplan context named public . -->
       </settings>

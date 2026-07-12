@@ -12,6 +12,8 @@ import { LoginComponent } from './components/login.component';
 import { CreateAgentComponent } from './components/create-agent.component';
 import { TelephonyOverlayComponent } from './components/telephony/telephony-overlay.component';
 import { DiagnosticsComponent } from './components/diagnostics.component';
+import { DialpadComponent } from './components/dialpad/dialpad.component';
+import { ContactsComponent } from './components/contacts/contacts.component';
 import { TelephonyService } from './services/telephony.service';
 import { FreeswitchWebRtcService } from './services/freeswitch-webrtc.service';
 
@@ -28,7 +30,9 @@ import { FreeswitchWebRtcService } from './services/freeswitch-webrtc.service';
     LoginComponent,
     CreateAgentComponent,
     TelephonyOverlayComponent,
-    DiagnosticsComponent
+    DiagnosticsComponent,
+    DialpadComponent,
+    ContactsComponent
   ],
   template: `
     <!-- UNAUTHENTICATED: Public diagnostics or login -->
@@ -124,6 +128,10 @@ import { FreeswitchWebRtcService } from './services/freeswitch-webrtc.service';
             <div class="nav-link" [class.active]="view === 'workspace'" (click)="view = 'workspace'">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
               My Workspace
+            </div>
+            <div class="nav-link" [class.active]="view === 'contacts'" (click)="view = 'contacts'">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+              Contacts
             </div>
             <div class="nav-link" [class.active]="view === 'activity'" (click)="view = 'activity'">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
@@ -251,10 +259,20 @@ import { FreeswitchWebRtcService } from './services/freeswitch-webrtc.service';
                     <div class="section-subtitle">Manage your presence and handle interactions</div>
                   </div>
                 </div>
-                <div class="grid grid-cols-2" style="margin-bottom: 20px;">
+                <div class="grid grid-cols-2" style="margin-bottom: 20px; gap: 20px; align-items: start;">
                   <app-agent-panel></app-agent-panel>
                   <app-call-panel></app-call-panel>
                 </div>
+              </div>
+
+              <div *ngIf="view === 'contacts'" class="animate-fade-in">
+                <div class="section-header">
+                  <div>
+                    <div class="section-title">Contacts</div>
+                    <div class="section-subtitle">Manage contacts and quick-dial outbound numbers</div>
+                  </div>
+                </div>
+                <app-contacts></app-contacts>
               </div>
 
               <div *ngIf="view === 'activity'" class="animate-fade-in">
@@ -272,8 +290,51 @@ import { FreeswitchWebRtcService } from './services/freeswitch-webrtc.service';
           </div>
         </div>
       </div>
+
+      <!-- Floating Action Button for Dialpad (visible only for agents) -->
+      <button *ngIf="role === 'AGENT'" class="dialpad-fab" (click)="showDialpad = true" title="Open Dialpad">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+        </svg>
+      </button>
+
+      <!-- Dialpad Modal -->
+      <app-dialpad *ngIf="showDialpad && role === 'AGENT'" (close)="showDialpad = false"></app-dialpad>
     </div>
   `,
+  styles: [`
+    .dialpad-fab {
+      position: fixed;
+      bottom: 32px;
+      right: 32px;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+      border: none;
+      box-shadow: 0 4px 16px rgba(76, 175, 80, 0.4), 0 8px 32px rgba(76, 175, 80, 0.2);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s ease;
+      z-index: 900;
+      color: white;
+    }
+
+    .dialpad-fab:hover {
+      transform: scale(1.1) translateY(-2px);
+      box-shadow: 0 6px 20px rgba(76, 175, 80, 0.5), 0 12px 40px rgba(76, 175, 80, 0.3);
+    }
+
+    .dialpad-fab:active {
+      transform: scale(1.05);
+    }
+
+    .dialpad-fab svg {
+      filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+    }
+  `]
 })
 export class AppComponent {
   isLoggedIn = false;
@@ -284,6 +345,7 @@ export class AppComponent {
   /** Shown as a banner above the login form after a forced kick. */
   kickMessage = '';
   private loggingOut = false;
+  showDialpad = false;
 
   constructor(
     private api: ApiService,
@@ -455,6 +517,7 @@ export class AppComponent {
       'audit': 'Audit Trail',
       'diagnostics': 'Diagnostics',
       'workspace': 'Workspace',
+      'contacts': 'Contacts',
       'activity': 'Activity Log'
     };
     return titles[this.view] || this.view;

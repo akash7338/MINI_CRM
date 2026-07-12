@@ -1,0 +1,279 @@
+.dialpad-modal-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.dialpad-container {
+  max-width: 380px;
+  width: 90%;
+  margin: 0;
+  padding: 24px;
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  animation: slideUp 0.3s ease-out;
+  position: relative;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.dialpad-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.dialpad-header h2 {
+  margin: 0;
+  color: #333;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.close-button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 8px;
+  color: #666;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.close-button:hover:not(:disabled) {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.close-button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.phone-display {
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.phone-input {
+  width: 100%;
+  padding: 12px;
+  font-size: 20px;
+  text-align: center;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  background: #f9f9f9;
+  margin-bottom: 8px;
+}
+
+.formatted-number {
+  font-size: 14px;
+  color: #666;
+  min-height: 20px;
+}
+
+.error-message {
+  background: #fee;
+  color: #c33;
+  padding: 10px;
+  border-radius: 6px;
+  margin-bottom: 15px;
+  text-align: center;
+  font-size: 14px;
+}
+
+.dialpad-grid {
+  margin-bottom: 15px;
+}
+
+.dialpad-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+  justify-content: center;
+}
+
+.dialpad-row.single-button {
+  justify-content: center;
+}
+
+.dialpad-button {
+  width: 70px;
+  height: 70px;
+  font-size: 28px;
+  font-weight: 600;
+  border: 2px solid #e0e0e0;
+  border-radius: 50%;
+  background: white;
+  color: #333;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.dialpad-button:hover:not(:disabled) {
+  background: #f0f0f0;
+  transform: scale(1.05);
+}
+
+.dialpad-button:active:not(:disabled) {
+  background: #e0e0e0;
+  transform: scale(0.95);
+}
+
+.dialpad-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dialpad-button.plus-button {
+  background: #2196f3;
+  color: white;
+  border-color: #2196f3;
+}
+
+.dialpad-button.plus-button:hover:not(:disabled) {
+  background: #1976d2;
+}
+
+.dialpad-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.action-button {
+  flex: 1;
+  padding: 12px;
+  font-size: 16px;
+  font-weight: 600;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.action-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.backspace-button {
+  background: #ff9800;
+  color: white;
+}
+
+.backspace-button:hover:not(:disabled) {
+  background: #f57c00;
+}
+
+.call-button {
+  background: #4caf50;
+  color: white;
+  flex: 2;
+}
+
+.call-button:hover:not(:disabled) {
+  background: #45a049;
+}
+
+.clear-button {
+  background: #f44336;
+  color: white;
+}
+
+.clear-button:hover:not(:disabled) {
+  background: #da190b;
+}
+
+.action-button span {
+  font-size: 18px;
+}
+
+.call-progress-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.98);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16px;
+  z-index: 10;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.call-progress-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  padding: 32px;
+  text-align: center;
+}
+
+.call-progress-spinner {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+.call-progress-text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.call-progress-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: #333;
+}
+
+.call-progress-subtitle {
+  font-size: 14px;
+  color: #666;
+}
